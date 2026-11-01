@@ -32,6 +32,7 @@ import com.fable.app.presentation.books.search.BookSearchScreen
 import com.fable.app.presentation.reading.MyLibraryScreen
 import com.fable.app.presentation.reading.ReadingStatisticsScreen
 import com.fable.app.presentation.reading.ReadingHomeScreen
+import com.fable.app.presentation.reviews.MyReviewsScreen
 
 private val primaryDestinations = listOf("home", "discover", "search", "library")
 
@@ -90,6 +91,7 @@ fun AuthenticatedBooksApp(
                     onSearch = { navController.navigate("search") },
                     onLibrary = { navController.navigate("library") },
                     onStatistics = { navController.navigate("reading-statistics") },
+                    onMyReviews = { navController.navigate("my-reviews") },
                     onBookClick = { bookId -> navController.navigate("book/${Uri.encode(bookId)}") },
                 )
             }
@@ -125,11 +127,16 @@ fun AuthenticatedBooksApp(
             composable("reading-statistics") {
                 ReadingStatisticsScreen(dependencies, userId)
             }
+            composable("my-reviews") {
+                MyReviewsScreen(dependencies, userId, profile.username) { bookId ->
+                    navController.navigate("book/${Uri.encode(bookId)}")
+                }
+            }
             composable(
                 route = "book/{bookId}",
                 arguments = listOf(navArgument("bookId") { type = NavType.StringType }),
             ) { entry ->
-                BookDetailsScreen(dependencies, userId, entry.arguments?.getString("bookId").orEmpty())
+                BookDetailsScreen(dependencies, userId, profile.username, entry.arguments?.getString("bookId").orEmpty())
             }
         }
     }

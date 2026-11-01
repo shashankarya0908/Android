@@ -90,6 +90,30 @@
 - Build used JDK 21, Android SDK 36, Gradle 8.13, and Kotlin 2.4.21. The existing Gradle forward-compatibility warning remains non-blocking.
 - No Firebase project configuration or emulator was available. Firestore security rules, live cloud writes, and offline recovery were not tested against Firebase; no live cloud behavior is claimed as verified.
 
+## Phase 5 — Reviews and ratings
+
+### Completed
+
+- Added `BookReview` and review-summary domain models, 1–5-star validation, edit/create date preservation, owner checks, and per-reviewer average/count calculations.
+- Added a Room `book_reviews` table with `(userId, bookId)` primary key and a v2→v3 migration, plus public-book and private-user Firestore DTO mapping.
+- Added Firestore review writes as atomic batches to `bookReviews/{sha256(bookId)}/reviews/{uid}` and `users/{uid}/reviews/{sha256(bookId)}`. Firestore rules allow signed-in reads of book reviews and restrict writes/deletes to their owner.
+- Integrated rating/review create, update, delete, average/count, reviewer/date display, empty/loading/error state and pending-sync feedback into Book Details.
+- Added My Reviews history from Home with navigation back to each book's details.
+- Added unit tests covering review creation, edit date behavior, deletion, duplicate key, rating bounds, ownership, average/count/empty summaries and repository error presentation.
+
+### Cloud configuration and limits
+
+- Firebase config is absent and no live Firestore project is available. Review reads, rule enforcement, batch writes and offline recovery are not claimed as live-verified.
+- Average and review count are derived from current review records on the client; there is no server-side aggregate or additional dependency.
+
+### Verification
+
+- `gradlew.bat assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**.
+- 35 JVM unit tests passed; 0 failures, 0 errors, 0 skipped (10 Phase 5 tests; 25 from Phases 1–4).
+- Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
+- Build used JDK 21, Android SDK 36, Gradle 8.13, and Kotlin 2.4.21. Gradle's Kotlin 2.5 forward-compatibility warning remains non-blocking.
+- No Firebase project configuration or emulator was available. Firestore rules, batch writes, public review reads, and offline synchronization were not verified against a live Firebase project.
+
 ### Remaining phases
 
-Reviews; friend requests; activity feed; theme persistence; broader integration tests; public profile privacy rules; release verification.
+Friend requests; activity feed; theme persistence; broader integration testing; public profile privacy rules; release verification.

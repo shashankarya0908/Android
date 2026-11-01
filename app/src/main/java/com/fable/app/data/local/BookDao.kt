@@ -8,6 +8,39 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BookDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertBookReview(review: BookReviewEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertBookReviews(reviews: List<BookReviewEntity>)
+
+    @Query("SELECT * FROM book_reviews WHERE bookId = :bookId AND deleted = 0 ORDER BY updatedAt DESC")
+    fun observeBookReviews(bookId: String): Flow<List<BookReviewEntity>>
+
+    @Query("SELECT * FROM book_reviews WHERE userId = :userId AND deleted = 0 ORDER BY updatedAt DESC")
+    fun observeMyReviews(userId: String): Flow<List<BookReviewEntity>>
+
+    @Query("SELECT COUNT(*) FROM book_reviews WHERE userId = :userId AND pendingSync = 1")
+    fun observePendingReviewChanges(userId: String): Flow<Int>
+
+    @Query("SELECT * FROM book_reviews WHERE userId = :userId AND bookId = :bookId LIMIT 1")
+    suspend fun getBookReview(userId: String, bookId: String): BookReviewEntity?
+
+    @Query("SELECT * FROM book_reviews WHERE userId = :userId ORDER BY updatedAt ASC")
+    suspend fun getAllReviewsForUser(userId: String): List<BookReviewEntity>
+
+    @Query("SELECT * FROM book_reviews WHERE bookId = :bookId ORDER BY updatedAt ASC")
+    suspend fun getAllReviewsForBook(bookId: String): List<BookReviewEntity>
+
+    @Query("UPDATE book_reviews SET pendingSync = 0 WHERE userId = :userId AND bookId = :bookId AND updatedAt = :expectedUpdatedAt AND deleted = 0")
+    suspend fun markBookReviewSynced(userId: String, bookId: String, expectedUpdatedAt: Long)
+
+    @Query("DELETE FROM book_reviews WHERE userId = :userId AND bookId = :bookId AND updatedAt = :expectedUpdatedAt AND deleted = 1")
+    suspend fun removeDeletedBookReviewIfCurrent(userId: String, bookId: String, expectedUpdatedAt: Long)
+
+    @Query("DELETE FROM book_reviews WHERE userId = :userId AND bookId = :bookId")
+    suspend fun removeBookReview(userId: String, bookId: String)
+
     @androidx.room.Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLibraryEntry(entry: LibraryCacheEntity)
 

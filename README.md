@@ -4,7 +4,7 @@ Fable is an Android social reading app for discovering books, tracking a persona
 
 ## Current status
 
-Phases 1–4 are implemented. Email/password flows and profile persistence use Firebase Auth and Cloud Firestore when configured. The app remains buildable without Firebase credentials and clearly reports that account actions require setup. Live Firebase behavior has not been verified because this workspace has no Firebase project configuration. Authenticated users also have Google Books discovery, search, genre exploration, book details, cached search pages, recent searches, personal shelves, and a reading tracker.
+Phases 1–5 are implemented. Email/password flows and profile persistence use Firebase Auth and Cloud Firestore when configured. The app remains buildable without Firebase credentials and clearly reports that account actions require setup. Live Firebase behavior has not been verified because this workspace has no Firebase project configuration. Authenticated users also have Google Books discovery, search, genre exploration, book details, cached search pages, recent searches, personal shelves, a reading tracker, and book ratings/reviews.
 
 ## Features implemented
 
@@ -19,6 +19,7 @@ Phases 1–4 are implemented. Email/password flows and profile persistence use F
 - Debounced search with search-type filters, duplicate-safe pagination, image fallbacks, and network/HTTP error states.
 - Personal Want to Read, Currently Reading, and Read shelves with library search, category filters, sorting, moves, removals, and book-detail links.
 - Per-user reading progress, notes, dates, completion history, locally cached edits, and reading statistics calculated from saved library entries.
+- One 1–5-star rating and optional written review per user and book, with edit/delete, book detail summaries, and personal review history.
 
 ## Technology
 
@@ -43,8 +44,14 @@ Phases 1–4 are implemented. Email/password flows and profile persistence use F
 - `users/{uid}`: the authenticated user's profile fields (`uid`, `username`, `displayName`, `email`, `bio`, `profileImageUrl`, `favouriteGenres`, `favouriteBooks`, `selectedTheme`, `createdAt`, `updatedAt`). Only the owner can read or change the profile in this phase.
 - `usernames/{normalizedUsername}`: a private uniqueness claim containing the owning `uid` and normalized username. Authenticated clients can get a claim for reservation checks, but cannot list claims. Create/delete is restricted to the owning authenticated account. Profile writes and username claims are checked atomically by Firestore rules using `getAfter()`.
 - Passwords are managed only by Firebase Authentication and are never written to Firestore.
+- `bookReviews/{bookKey}/reviews/{uid}`: a signed-in-readable review/rating record keyed by stable book hash and reviewer UID. A user may create, edit, or delete only their own record. Average and count are calculated from the current review records.
+- `users/{uid}/reviews/{bookKey}`: a private mirror for the user's review history. Batch writes keep the public book view and private history copy together.
 
 The current rules intentionally do not expose profiles publicly. Public profile reads will need a separate privacy design in the social phase.
+
+## Reviews and ratings
+
+Book Details shows the Fable average, rating/review count, reviewer usernames, stars, written reviews, and review dates. Each authenticated reviewer has one row per stable `Book.id`; a rating can be saved without written text. The user's review history is available from Home and links back to Book Details. Room caches entries and retains pending local writes; Firestore updates the public book-scoped record and private user history mirror in one batch. Live Firebase review synchronization is unverified until a Firebase project is configured.
 
 ### Personal library schema and sync
 
@@ -73,8 +80,8 @@ PowerShell:
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-25 JVM unit tests cover Phase 2 authentication/profile behavior, Phase 3 Google Books mapping/search/repository behavior, and Phase 4 stable library identity, shelf transitions, progress validation, completion history, statistics, and repository error presentation. Tests do not prove live Firebase behavior or a successful live Google Books response.
+35 JVM unit tests cover authentication/profile behavior, book discovery, reading shelves/progress, and Phase 5 review creation, editing, deletion, uniqueness, ownership, rating summaries, empty state, and UI error presentation. Tests do not prove live Firebase behavior or a successful live Google Books response.
 
 ## Remaining work
 
-Reviews, friend requests, activity feed, theme persistence, broader integration testing, and public profile privacy rules are planned for later phases.
+Friend requests, activity feed, theme persistence, broader integration testing, and public profile privacy rules are planned for later phases.

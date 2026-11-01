@@ -2,6 +2,7 @@ package com.fable.app.books
 
 import com.fable.app.data.local.BookCacheEntity
 import com.fable.app.data.local.BookDao
+import com.fable.app.data.local.BookReviewEntity
 import com.fable.app.data.local.LibraryCacheEntity
 import com.fable.app.data.local.SearchHistoryEntity
 import com.fable.app.data.local.toCacheEntity
@@ -133,7 +134,20 @@ private class FakeGoogleBooksApi(
 private class FakeBookDao : BookDao {
     val cachedBooks = mutableMapOf<String, BookCacheEntity>()
     private val library = mutableMapOf<Pair<String, String>, LibraryCacheEntity>()
+    private val reviews = MutableStateFlow<Map<Pair<String, String>, BookReviewEntity>>(emptyMap())
     private val searches = MutableStateFlow<List<SearchHistoryEntity>>(emptyList())
+
+    override suspend fun upsertBookReview(review: BookReviewEntity) { reviews.value = reviews.value + ((review.userId to review.bookId) to review) }
+    override suspend fun upsertBookReviews(reviews: List<BookReviewEntity>) { reviews.forEach { upsertBookReview(it) } }
+    override fun observeBookReviews(bookId: String): Flow<List<BookReviewEntity>> = reviews.map { rows -> rows.values.filter { it.bookId == bookId && !it.deleted } }
+    override fun observeMyReviews(userId: String): Flow<List<BookReviewEntity>> = reviews.map { rows -> rows.values.filter { it.userId == userId && !it.deleted } }
+    override fun observePendingReviewChanges(userId: String): Flow<Int> = reviews.map { rows -> rows.values.count { it.userId == userId && it.pendingSync } }
+    override suspend fun getBookReview(userId: String, bookId: String): BookReviewEntity? = reviews.value[userId to bookId]
+    override suspend fun getAllReviewsForUser(userId: String): List<BookReviewEntity> = reviews.value.values.filter { it.userId == userId }
+    override suspend fun getAllReviewsForBook(bookId: String): List<BookReviewEntity> = reviews.value.values.filter { it.bookId == bookId }
+    override suspend fun markBookReviewSynced(userId: String, bookId: String, expectedUpdatedAt: Long) { reviews.value[userId to bookId]?.takeIf { it.updatedAt == expectedUpdatedAt }?.let { reviews.value = reviews.value + ((userId to bookId) to it.copy(pendingSync = false)) } }
+    override suspend fun removeDeletedBookReviewIfCurrent(userId: String, bookId: String, expectedUpdatedAt: Long) { reviews.value[userId to bookId]?.takeIf { it.deleted && it.updatedAt == expectedUpdatedAt }?.let { reviews.value = reviews.value - (userId to bookId) } }
+    override suspend fun removeBookReview(userId: String, bookId: String) { reviews.value = reviews.value - (userId to bookId) }
 
     override suspend fun upsertLibraryEntry(entry: LibraryCacheEntity) { library[entry.userId to entry.bookId] = entry }
     override suspend fun upsertLibraryEntries(entries: List<LibraryCacheEntity>) = entries.forEach { upsertLibraryEntry(it) }

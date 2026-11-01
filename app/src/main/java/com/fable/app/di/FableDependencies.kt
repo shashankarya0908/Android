@@ -8,6 +8,7 @@ import com.fable.app.data.repository.FirebaseAuthenticationRepository
 import com.fable.app.data.repository.FirestoreUserRepository
 import com.fable.app.data.repository.GoogleBooksRepository
 import com.fable.app.data.repository.FirestoreReadingRepository
+import com.fable.app.data.repository.FirestoreReviewRepository
 import com.fable.app.data.local.FableDatabase
 import com.fable.app.data.remote.BooksNetworkModule
 import com.fable.app.domain.model.AuthUser
@@ -16,6 +17,7 @@ import com.fable.app.domain.repository.AuthenticationRepository
 import com.fable.app.domain.repository.UserRepository
 import com.fable.app.domain.repository.BookRepository
 import com.fable.app.domain.repository.ReadingRepository
+import com.fable.app.domain.repository.ReviewRepository
 import com.fable.app.presentation.auth.AuthenticationViewModel
 import com.fable.app.presentation.auth.ProfileViewModel
 import com.fable.app.presentation.books.BookSearchViewModel
@@ -37,10 +39,11 @@ class FableDependencies(context: Context) {
     val userRepository: UserRepository
     val bookRepository: BookRepository
     val readingRepository: ReadingRepository
+    val reviewRepository: ReviewRepository
 
     init {
         val database = Room.databaseBuilder(context.applicationContext, FableDatabase::class.java, "fable.db")
-            .addMigrations(FableDatabase.MIGRATION_1_2)
+            .addMigrations(FableDatabase.MIGRATION_1_2, FableDatabase.MIGRATION_2_3)
             .build()
         bookRepository = GoogleBooksRepository(
             BooksNetworkModule.createGoogleBooksService(),
@@ -51,10 +54,12 @@ class FableDependencies(context: Context) {
             authenticationRepository = FirebaseAuthenticationRepository(FirebaseAuth.getInstance())
             userRepository = FirestoreUserRepository(FirebaseFirestore.getInstance())
             readingRepository = FirestoreReadingRepository(FirebaseFirestore.getInstance(), database.bookDao())
+            reviewRepository = FirestoreReviewRepository(FirebaseFirestore.getInstance(), database.bookDao())
         } else {
             authenticationRepository = UnconfiguredAuthenticationRepository()
             userRepository = UnconfiguredUserRepository()
             readingRepository = UnconfiguredReadingRepository()
+            reviewRepository = UnconfiguredReviewRepository()
         }
     }
 }
@@ -101,6 +106,17 @@ class ReadingViewModelFactory(
         com.fable.app.presentation.reading.ReadingViewModel(userId, dependencies.readingRepository) as T
 }
 
+class ReviewViewModelFactory(
+    private val dependencies: FableDependencies,
+    private val userId: String,
+    private val username: String,
+    private val bookId: String? = null,
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        com.fable.app.presentation.reviews.ReviewViewModel(userId, username, dependencies.reviewRepository, bookId) as T
+}
+
 private class UnconfiguredAuthenticationRepository : AuthenticationRepository {
     override fun observeCurrentUser(): Flow<AuthUser?> = flowOf(null)
     override suspend fun register(email: String, password: String): AuthUser = throw FirebaseConfigurationRequiredException()
@@ -128,5 +144,20 @@ private class UnconfiguredReadingRepository : ReadingRepository {
     override suspend fun removeBook(userId: String, bookId: String) = throw FirebaseConfigurationRequiredException()
     override suspend fun updateProgress(userId: String, bookId: String, currentPage: Int, personalNotes: String?): com.fable.app.domain.model.UserBook =
         throw FirebaseConfigurationRequiredException()
+    override suspend fun synchronizePending(userId: String) = throw FirebaseConfigurationRequiredException()
+}
+
+private class UnconfiguredReviewRepository : ReviewRepository {
+    override fun observeBookReviews(bookId: String): Flow<List<com.fable.app.domain.model.BookReview>> = flowOf(emptyList())
+    override fun observeMyReviews(userId: String): Flow<List<com.fable.app.domain.model.BookReview>> = flowOf(emptyList())
+    override fun observePendingChanges(userId: String): Flow<Int> = flowOf(0)
+    override suspend fun saveReview(
+        userId: String,
+        username: String,
+        book: com.fable.app.domain.model.Book,
+        rating: Int,
+        reviewText: String?,
+    ): com.fable.app.domain.model.BookReview = throw FirebaseConfigurationRequiredException()
+    override suspend fun deleteReview(userId: String, bookId: String) = throw FirebaseConfigurationRequiredException()
     override suspend fun synchronizePending(userId: String) = throw FirebaseConfigurationRequiredException()
 }

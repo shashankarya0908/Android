@@ -76,6 +76,27 @@ service cloud.firestore {
         && data.completionHistory.size() <= 100;
     }
 
+    function validBookReview(reviewerId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'reviewerId', 'reviewerUsername', 'bookId', 'bookTitle', 'bookThumbnailUrl',
+          'rating', 'reviewText', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'reviewerId', 'reviewerUsername', 'bookId', 'bookTitle', 'bookThumbnailUrl',
+          'rating', 'reviewText', 'createdAt', 'updatedAt'
+        ])
+        && data.reviewerId == reviewerId
+        && data.reviewerUsername is string
+        && data.reviewerUsername.size() >= 3 && data.reviewerUsername.size() <= 20
+        && data.bookId is string && data.bookId.size() > 0 && data.bookId.size() <= 300
+        && data.bookTitle is string && data.bookTitle.size() > 0 && data.bookTitle.size() <= 500
+        && (data.bookThumbnailUrl == null || (data.bookThumbnailUrl is string && data.bookThumbnailUrl.size() <= 2000))
+        && data.rating is int && data.rating >= 1 && data.rating <= 5
+        && data.reviewText is string && data.reviewText.size() <= 4000
+        && data.createdAt is int && data.updatedAt is int;
+    }
+
     match /users/{userId} {
       allow get: if signedInAs(userId);
       allow list: if false;
@@ -99,6 +120,28 @@ service cloud.firestore {
           && request.resource.data.addedAt == resource.data.addedAt;
         allow delete: if signedInAs(userId) && resource.data.userId == userId;
       }
+
+      match /reviews/{bookKey} {
+        allow get, list: if signedInAs(userId);
+        allow create: if signedInAs(userId) && validBookReview(userId);
+        allow update: if signedInAs(userId)
+          && validBookReview(userId)
+          && request.resource.data.reviewerId == resource.data.reviewerId
+          && request.resource.data.bookId == resource.data.bookId
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if signedInAs(userId) && resource.data.reviewerId == userId;
+      }
+    }
+
+    match /bookReviews/{bookKey}/reviews/{reviewerId} {
+      allow get, list: if request.auth != null;
+      allow create: if signedInAs(reviewerId) && validBookReview(reviewerId);
+      allow update: if signedInAs(reviewerId)
+        && validBookReview(reviewerId)
+        && request.resource.data.reviewerId == resource.data.reviewerId
+        && request.resource.data.bookId == resource.data.bookId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if signedInAs(reviewerId) && resource.data.reviewerId == reviewerId;
     }
 
     match /usernames/{username} {

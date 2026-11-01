@@ -21,16 +21,17 @@ presentation  ->  domain  <-  data
 com.fable.app/
   data/local/                  Room database, book cache and search history
   data/remote/googlebooks/     Retrofit service, Google Books DTOs and mapping
-  data/remote/firestore/       UserBook DTO, Firestore mapper and stable document IDs
-  data/repository/             Firebase Auth, Firestore, book and reading repository implementations
+  data/remote/firestore/       UserBook and BookReview DTOs, mappers and stable document IDs
+  data/repository/             Firebase Auth, Firestore, book, reading and review repositories
   di/                          dependency selection and ViewModel factory
-  domain/model/                AuthUser, UserProfile, Book, UserBook and reading statistics
-  domain/repository/           auth, profile, book and reading contracts
-  domain/usecase/              auth/profile/book operations and library use cases
+  domain/model/                AuthUser, UserProfile, Book, UserBook, BookReview and statistics
+  domain/repository/           auth, profile, book, reading and review contracts
+  domain/usecase/              auth/profile/book/library/review use cases
   domain/validation/           registration, login and profile validation
   presentation/auth/           auth/profile screens and ViewModels
   presentation/books/           discovery, search, category and detail UI/ViewModels
   presentation/reading/         personal library, progress and statistics UI/ViewModel
+  presentation/reviews/         book review UI/ViewModel and personal review history
   presentation/home/           temporary authenticated home
   presentation/theme/          centralized Compose theme
 ```
@@ -62,5 +63,12 @@ com.fable.app/
 ## Firestore security
 
 `firestore.rules` restricts profile reads and writes to the signed-in owner, requires a valid normalized username, and verifies the username claim after an atomic write. Username claims cannot be listed. Public profile access is intentionally not enabled in Phase 2 and must be designed with privacy controls in the social phase.
+
+## Reviews and ratings
+
+- `ReviewRepository` keeps review data separate from reading progress. Room stores one row per `(userId, bookId)` and caches book review lists and personal history.
+- Each rating/review is stored at `bookReviews/{sha256(bookId)}/reviews/{uid}` and mirrored at `users/{uid}/reviews/{sha256(bookId)}`. The Firestore batch keeps those views together; the deterministic reviewer document ID and Room composite key prevent duplicate user/book reviews.
+- Book Details observes cached and Firestore reviews, derives average/count from current records, and exposes the signed-in user's rating/text for updates or deletion. My Reviews reads the private mirror and links back to each book.
+- Firestore rules allow signed-in users to read book reviews while create/update/delete is restricted to the review owner. The user history mirror remains private. Live Firebase behavior is unverified without `google-services.json` and a configured project.
 
 The application theme remains independent of auth/profile data. Theme persistence and selectable visual identities are deferred to the settings phase.

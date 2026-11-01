@@ -36,6 +36,7 @@ fun ReadingHomeScreen(
     onSearch: () -> Unit,
     onLibrary: () -> Unit,
     onStatistics: () -> Unit,
+    onMyReviews: () -> Unit,
     onBookClick: (String) -> Unit,
 ) {
     val viewModel: ReadingViewModel = viewModel(key = "home-reading-$userId", factory = ReadingViewModelFactory(dependencies, userId))
@@ -65,6 +66,7 @@ fun ReadingHomeScreen(
                 OutlinedButton(onClick = onSearch, modifier = Modifier.weight(1f)) { Text("Search books") }
             }
         }
+        item { OutlinedButton(onClick = onMyReviews) { Text("My Reviews") } }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Currently reading", style = MaterialTheme.typography.titleLarge)

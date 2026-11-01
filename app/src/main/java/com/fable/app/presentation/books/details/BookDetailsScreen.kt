@@ -40,9 +40,10 @@ import com.fable.app.di.ReadingViewModelFactory
 import com.fable.app.domain.model.ReadingStatus
 import com.fable.app.presentation.reading.ReadingViewModel
 import com.fable.app.presentation.reading.label
+import com.fable.app.presentation.reviews.BookReviewsSection
 
 @Composable
-fun BookDetailsScreen(dependencies: FableDependencies, userId: String, bookId: String) {
+fun BookDetailsScreen(dependencies: FableDependencies, userId: String, username: String, bookId: String) {
     val factory = BookDetailsViewModelFactory(dependencies, bookId)
     val viewModel: BookDetailsViewModel = viewModel(key = "book-$bookId", factory = factory)
     val readingViewModel: ReadingViewModel = viewModel(
@@ -126,6 +127,7 @@ fun BookDetailsScreen(dependencies: FableDependencies, userId: String, bookId: S
                 if (readingState.syncState.pendingChanges > 0) Text("Saved locally · waiting to sync")
                 readingState.syncState.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 readingState.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                BookReviewsSection(dependencies, userId, username, book)
             }
         }
     }
