@@ -37,6 +37,12 @@ fun ReadingHomeScreen(
     onLibrary: () -> Unit,
     onStatistics: () -> Unit,
     onMyReviews: () -> Unit,
+    onDiscoverReaders: () -> Unit,
+    onFriends: () -> Unit,
+    onFriendRequests: () -> Unit,
+    onActivityFeed: () -> Unit,
+    onMyProfile: () -> Unit,
+    onSelectTheme: () -> Unit,
     onBookClick: (String) -> Unit,
 ) {
     val viewModel: ReadingViewModel = viewModel(key = "home-reading-$userId", factory = ReadingViewModelFactory(dependencies, userId))
@@ -67,6 +73,19 @@ fun ReadingHomeScreen(
             }
         }
         item { OutlinedButton(onClick = onMyReviews) { Text("My Reviews") } }
+        item {
+            Text("Reading community", style = MaterialTheme.typography.titleLarge)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onDiscoverReaders, modifier = Modifier.weight(1f)) { Text("Discover Readers") }
+                OutlinedButton(onClick = onFriends, modifier = Modifier.weight(1f)) { Text("Friends") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onFriendRequests, modifier = Modifier.weight(1f)) { Text("Friend Requests") }
+                OutlinedButton(onClick = onActivityFeed, modifier = Modifier.weight(1f)) { Text("Activity Feed") }
+            }
+            OutlinedButton(onClick = onMyProfile) { Text("My Reader Profile") }
+            OutlinedButton(onClick = onSelectTheme) { Text("Choose a theme") }
+        }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Currently reading", style = MaterialTheme.typography.titleLarge)

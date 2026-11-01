@@ -40,11 +40,14 @@ object AuthValidation {
         }
     }
 
-    fun validateProfile(username: String, displayName: String, bio: String): String? = when {
+    fun validateProfile(username: String, displayName: String, bio: String, profileImageUrl: String? = null): String? = when {
         !usernamePattern.matches(normalizeUsername(username)) ->
             "Username must be 3–20 characters using letters, numbers, or underscores."
         displayName.trim().length !in 2..40 -> "Display name must be 2–40 characters."
         bio.length > 280 -> "Biography must be 280 characters or fewer."
+        !profileImageUrl.isNullOrBlank() &&
+            (!profileImageUrl.startsWith("https://", ignoreCase = true) || profileImageUrl.length > 2048) ->
+            "Profile images must use an HTTPS URL of 2,048 characters or fewer."
         else -> null
     }
 }

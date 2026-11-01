@@ -9,17 +9,26 @@ import com.fable.app.data.repository.FirestoreUserRepository
 import com.fable.app.data.repository.GoogleBooksRepository
 import com.fable.app.data.repository.FirestoreReadingRepository
 import com.fable.app.data.repository.FirestoreReviewRepository
+import com.fable.app.data.repository.FirestoreSocialRepository
+import com.fable.app.data.local.LocalThemePreferenceRepository
 import com.fable.app.data.local.FableDatabase
 import com.fable.app.data.remote.BooksNetworkModule
 import com.fable.app.domain.model.AuthUser
 import com.fable.app.domain.model.UserProfile
+import com.fable.app.domain.model.PublicReaderProfile
 import com.fable.app.domain.repository.AuthenticationRepository
 import com.fable.app.domain.repository.UserRepository
 import com.fable.app.domain.repository.BookRepository
 import com.fable.app.domain.repository.ReadingRepository
 import com.fable.app.domain.repository.ReviewRepository
+import com.fable.app.domain.repository.SocialRepository
+import com.fable.app.domain.repository.ThemePreferenceRepository
+import com.fable.app.domain.model.FriendRequest
+import com.fable.app.domain.model.ReaderActivity
 import com.fable.app.presentation.auth.AuthenticationViewModel
 import com.fable.app.presentation.auth.ProfileViewModel
+import com.fable.app.presentation.social.SocialViewModel
+import com.fable.app.presentation.theme.ThemeSettingsViewModel
 import com.fable.app.presentation.books.BookSearchViewModel
 import com.fable.app.presentation.books.DiscoverViewModel
 import com.google.firebase.FirebaseApp
@@ -40,6 +49,8 @@ class FableDependencies(context: Context) {
     val bookRepository: BookRepository
     val readingRepository: ReadingRepository
     val reviewRepository: ReviewRepository
+    val socialRepository: SocialRepository
+    val themePreferenceRepository: ThemePreferenceRepository = LocalThemePreferenceRepository(context.applicationContext)
 
     init {
         val database = Room.databaseBuilder(context.applicationContext, FableDatabase::class.java, "fable.db")
@@ -55,13 +66,43 @@ class FableDependencies(context: Context) {
             userRepository = FirestoreUserRepository(FirebaseFirestore.getInstance())
             readingRepository = FirestoreReadingRepository(FirebaseFirestore.getInstance(), database.bookDao())
             reviewRepository = FirestoreReviewRepository(FirebaseFirestore.getInstance(), database.bookDao())
+            socialRepository = FirestoreSocialRepository(FirebaseFirestore.getInstance())
         } else {
             authenticationRepository = UnconfiguredAuthenticationRepository()
             userRepository = UnconfiguredUserRepository()
             readingRepository = UnconfiguredReadingRepository()
             reviewRepository = UnconfiguredReviewRepository()
+            socialRepository = UnconfiguredSocialRepository()
         }
     }
+}
+
+class SocialViewModelFactory(
+    private val dependencies: FableDependencies,
+    private val userId: String,
+    private val profile: UserProfile,
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = SocialViewModel(
+        userId,
+        PublicReaderProfile(
+            uid = profile.uid,
+            username = profile.username,
+            displayName = profile.displayName,
+            bio = profile.bio,
+            profileImageUrl = profile.profileImageUrl,
+            favouriteGenres = profile.favouriteGenres,
+        ),
+        dependencies.socialRepository,
+    ) as T
+}
+
+class ThemeSettingsViewModelFactory(private val dependencies: FableDependencies) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = ThemeSettingsViewModel(
+        dependencies.userRepository,
+        dependencies.themePreferenceRepository,
+    ) as T
 }
 
 class FableViewModelFactory(private val dependencies: FableDependencies) : ViewModelProvider.Factory {
@@ -160,4 +201,19 @@ private class UnconfiguredReviewRepository : ReviewRepository {
     ): com.fable.app.domain.model.BookReview = throw FirebaseConfigurationRequiredException()
     override suspend fun deleteReview(userId: String, bookId: String) = throw FirebaseConfigurationRequiredException()
     override suspend fun synchronizePending(userId: String) = throw FirebaseConfigurationRequiredException()
+}
+
+private class UnconfiguredSocialRepository : SocialRepository {
+    override fun searchReaders(usernamePrefix: String): Flow<List<PublicReaderProfile>> = flowOf(emptyList())
+    override fun observeReaderProfile(uid: String): Flow<PublicReaderProfile?> = flowOf(null)
+    override fun observeIncomingRequests(userId: String): Flow<List<FriendRequest>> = flowOf(emptyList())
+    override fun observeOutgoingRequests(userId: String): Flow<List<FriendRequest>> = flowOf(emptyList())
+    override fun observeFriends(userId: String): Flow<List<PublicReaderProfile>> = flowOf(emptyList())
+    override fun observeActivityFeed(userId: String): Flow<List<ReaderActivity>> = flowOf(emptyList())
+    override suspend fun sendFriendRequest(sender: PublicReaderProfile, recipient: PublicReaderProfile) =
+        throw FirebaseConfigurationRequiredException()
+    override suspend fun acceptFriendRequest(userId: String, senderId: String) = throw FirebaseConfigurationRequiredException()
+    override suspend fun rejectFriendRequest(userId: String, senderId: String) = throw FirebaseConfigurationRequiredException()
+    override suspend fun cancelFriendRequest(userId: String, recipientId: String) = throw FirebaseConfigurationRequiredException()
+    override suspend fun removeFriend(userId: String, friendId: String) = throw FirebaseConfigurationRequiredException()
 }

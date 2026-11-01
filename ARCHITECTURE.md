@@ -13,7 +13,7 @@ presentation  ->  domain  <-  data
 - **Domain** contains app models, repository interfaces, validation, and use cases. It does not depend on Firebase or Compose.
 - **Data** implements domain repository interfaces. Firebase Auth and Firestore are confined to Firebase repository implementations; Retrofit, Google Books DTOs/mappers, and Room persistence implement book discovery and personal reading below the domain boundary.
 - **DI** is the small composition root that chooses Firebase implementations when Firebase is configured and safe unavailable implementations otherwise.
-- **Navigation** is an auth-aware Compose root. Authenticated users reach Home, Discover, Search, category results, Book Details, My Library, and Reading Progress through the navigation graph.
+- **Navigation** is an auth-aware Compose root. Authenticated users reach Home, Discover, Search, category results, Book Details, My Library, Reading Progress, My Reviews, reader discovery/profiles, friend requests, Friends, and the activity feed through the navigation graph.
 
 ## Current package layout
 
@@ -22,16 +22,17 @@ com.fable.app/
   data/local/                  Room database, book cache and search history
   data/remote/googlebooks/     Retrofit service, Google Books DTOs and mapping
   data/remote/firestore/       UserBook and BookReview DTOs, mappers and stable document IDs
-  data/repository/             Firebase Auth, Firestore, book, reading and review repositories
+  data/repository/             Firebase Auth, Firestore, book, reading, review and social repositories
   di/                          dependency selection and ViewModel factory
-  domain/model/                AuthUser, UserProfile, Book, UserBook, BookReview and statistics
-  domain/repository/           auth, profile, book, reading and review contracts
+  domain/model/                AuthUser, UserProfile, public reader, social, Book, UserBook, review and statistics models
+  domain/repository/           auth, profile, book, reading, review and social contracts
   domain/usecase/              auth/profile/book/library/review use cases
   domain/validation/           registration, login and profile validation
   presentation/auth/           auth/profile screens and ViewModels
   presentation/books/           discovery, search, category and detail UI/ViewModels
   presentation/reading/         personal library, progress and statistics UI/ViewModel
   presentation/reviews/         book review UI/ViewModel and personal review history
+  presentation/social/          reader discovery/profile, requests, friends, and activity feed
   presentation/home/           temporary authenticated home
   presentation/theme/          centralized Compose theme
 ```
@@ -62,7 +63,7 @@ com.fable.app/
 
 ## Firestore security
 
-`firestore.rules` restricts profile reads and writes to the signed-in owner, requires a valid normalized username, and verifies the username claim after an atomic write. Username claims cannot be listed. Public profile access is intentionally not enabled in Phase 2 and must be designed with privacy controls in the social phase.
+`firestore.rules` keeps `users/{uid}` private to its owner, requires a valid normalized username, and verifies username claims after atomic writes. Username claims cannot be listed. Social discovery reads a separate public profile allowlist that excludes email and auth data. Profile mutations are owner-only. Friend request rules bind sender/recipient UIDs to path IDs, permit only valid state transitions, and allow repeated requests only after a rejected/cancelled state. Mirrored friendship creation requires an accepted request and its reciprocal relationship; removal is limited to the involved users. Activity reads require an accepted friend record; activity records have a strict field allowlist that excludes personal notes.
 
 ## Reviews and ratings
 
@@ -71,4 +72,26 @@ com.fable.app/
 - Book Details observes cached and Firestore reviews, derives average/count from current records, and exposes the signed-in user's rating/text for updates or deletion. My Reviews reads the private mirror and links back to each book.
 - Firestore rules allow signed-in users to read book reviews while create/update/delete is restricted to the review owner. The user history mirror remains private. Live Firebase behavior is unverified without `google-services.json` and a configured project.
 
-The application theme remains independent of auth/profile data. Theme persistence and selectable visual identities are deferred to the settings phase.
+## Centralized theme system
+
+- `FableThemeDefinition` is the single source for each theme's Material 3 `ColorScheme`, semantic palette, type styles, shapes, and `FableThemeTokens` (page brush, card border, ornament, and elevation). The five definitions are Gothic, Gothic Romance, Dark Academia, Dreamscape, and Minimalist.
+- `FableApp` observes theme settings and applies `FableTheme` around the full auth-aware UI tree. App surfaces use `MaterialTheme`; changing the selected definition updates authentication, discovery, book detail, reading, review, and social destinations consistently. The picker renders previews from the same definitions used by the app.
+- `ThemePreferenceRepository` is a small domain boundary implemented by `LocalThemePreferenceRepository` using Android SharedPreferences. Preferences are keyed by authenticated UID, with a distinct anonymous key while signed out. This makes the local choice immediately available offline and separates cached choices between accounts.
+- With Firebase configured, `ThemeSettingsViewModel` syncs the selected theme through the existing `UserRepository.updateProfile` call to the owner's existing private `UserProfile.selectedTheme` field. No new public profile fields, Firestore collections/rules, Room entities, or migrations are introduced. Older/missing theme values default to Minimalist.
+- A local selection marked pending remains the displayed choice until cloud sync succeeds. Sync errors preserve the local choice and pending marker, and a subsequent profile/session restore retries. Without Firebase, the UI reports device-only persistence and does not claim cloud sync. Live sync remains unverified without project configuration.
+
+## Phase 8 integration audit notes
+
+- Room library and review rows are keyed by authenticated UID; repositories receive that UID from the authenticated navigation/session layer. Shared theme preferences are UID-keyed, with a separate anonymous key. Search history and book metadata cache are intentionally device-wide because they contain no user-authored private data.
+- Firebase Auth/Firestore and Google Books are adapters behind repository interfaces. Without their configuration/network, the app uses explicit unavailable auth, library, review, and social adapters or cached book results; it does not fabricate accounts or cloud records.
+- Review snapshot listener errors now close the repository flow with the underlying failure. The review ViewModel surfaces the message while preserving already-emitted cached reviews, instead of silently presenting a sync failure as an empty review list. A unit regression test covers this state; live listener behavior still needs a configured Firebase project.
+- Phase 8 did not change Room schema version 3 or Firestore rules. Rules were inspected as source but not evaluated by the Firebase emulator or deployed project.
+
+## Social profiles, requests, and activity
+
+- `PublicReaderProfile` contains username, display name, bio, HTTPS profile image URL, favourite genres, and aggregate reading statistics. It deliberately has no email field. `FirestoreUserRepository` mirrors profile changes into `publicProfiles/{uid}`; signed-in existing accounts receive the same mirror when their owner profile is observed.
+- Public statistics are counts derived from the owner's synchronized Room library records. Friends see only aggregate counts, not library records or personal notes. Social content remains cloud-only, so the Room database stays at schema v3 and no Phase 6 migration is needed.
+- Reader search uses a normalized-username prefix query capped at 30 profiles. Requests are stored in mirrored per-user incoming/outgoing paths with participant UIDs as document IDs. Accept writes two friend records atomically; remove clears both and closes the accepted request state so a later request can be made.
+- Library activity is published only after a Firestore library write succeeds. Progress uses 10% milestones or 10-page milestones when page count is unknown. Book additions and completion timestamps have stable IDs. Review activity uses one stable record per author/book and changes from published to updated.
+- The feed subscribes only to accepted friends' activity subcollections, merges recent entries, and filters by the current accepted-friend set. Activity fields carry book ID/title/cover, reader, event, progress or public review details, and timestamp; they never copy reading notes.
+- `firestore.rules` has been updated for public profile allowlists, requests, reciprocal friendships, and friend-only activity reads. This workspace has no Firebase config or emulator, so rules deployment and live synchronization remain unverified.

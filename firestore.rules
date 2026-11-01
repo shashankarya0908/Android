@@ -5,6 +5,10 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
     function validUsername(username) {
       return username is string && username.matches('^[a-z0-9_]{3,20}$');
     }
@@ -97,6 +101,103 @@ service cloud.firestore {
         && data.createdAt is int && data.updatedAt is int;
     }
 
+    function validPublicProfile(userId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'uid', 'username', 'usernameNormalized', 'displayName', 'bio', 'profileImageUrl',
+          'favouriteGenres', 'completedBooks', 'pagesRead', 'currentlyReading', 'wantToRead', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'username', 'usernameNormalized', 'displayName', 'bio', 'profileImageUrl',
+          'favouriteGenres', 'completedBooks', 'pagesRead', 'currentlyReading', 'wantToRead', 'updatedAt'
+        ])
+        && data.uid == userId
+        && validUsername(data.username)
+        && data.usernameNormalized == data.username
+        && data.displayName is string && data.displayName.size() >= 2 && data.displayName.size() <= 40
+        && (data.bio == null || (data.bio is string && data.bio.size() <= 280))
+        && (data.profileImageUrl == null || (data.profileImageUrl is string
+          && data.profileImageUrl.size() <= 2048 && data.profileImageUrl.matches('^https://.*$')))
+        && data.favouriteGenres is list && data.favouriteGenres.size() <= 20
+        && data.completedBooks is int && data.completedBooks >= 0
+        && data.pagesRead is int && data.pagesRead >= 0
+        && data.currentlyReading is int && data.currentlyReading >= 0
+        && data.wantToRead is int && data.wantToRead >= 0
+        && data.updatedAt is int;
+    }
+
+    function validFriendRequest(senderId, recipientId) {
+      let data = request.resource.data;
+      return senderId != recipientId
+        && data.keys().hasAll([
+          'senderId', 'senderUsername', 'senderDisplayName', 'senderImageUrl',
+          'recipientId', 'recipientUsername', 'recipientDisplayName', 'recipientImageUrl',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'senderId', 'senderUsername', 'senderDisplayName', 'senderImageUrl',
+          'recipientId', 'recipientUsername', 'recipientDisplayName', 'recipientImageUrl',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.senderId == senderId && data.recipientId == recipientId
+        && validUsername(data.senderUsername) && validUsername(data.recipientUsername)
+        && data.senderDisplayName is string && data.senderDisplayName.size() <= 40
+        && data.recipientDisplayName is string && data.recipientDisplayName.size() <= 40
+        && (data.senderImageUrl == null || (data.senderImageUrl is string && data.senderImageUrl.size() <= 2048))
+        && (data.recipientImageUrl == null || (data.recipientImageUrl is string && data.recipientImageUrl.size() <= 2048))
+        && data.status in ['PENDING', 'ACCEPTED', 'REJECTED', 'CANCELLED']
+        && data.createdAt is int && data.updatedAt is int;
+    }
+
+    function requestUsesPublicProfiles() {
+      let data = request.resource.data;
+      let sender = get(/databases/$(database)/documents/publicProfiles/$(data.senderId)).data;
+      let recipient = get(/databases/$(database)/documents/publicProfiles/$(data.recipientId)).data;
+      return sender.username == data.senderUsername
+        && sender.displayName == data.senderDisplayName
+        && sender.profileImageUrl == data.senderImageUrl
+        && recipient.username == data.recipientUsername
+        && recipient.displayName == data.recipientDisplayName
+        && recipient.profileImageUrl == data.recipientImageUrl;
+    }
+
+    function validActivity(readerId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'readerId', 'username', 'displayName', 'eventType', 'bookId', 'bookTitle',
+          'bookThumbnailUrl', 'currentPage', 'progressPercent', 'rating', 'reviewText', 'timestamp'
+        ])
+        && data.keys().hasOnly([
+          'readerId', 'username', 'displayName', 'eventType', 'bookId', 'bookTitle',
+          'bookThumbnailUrl', 'currentPage', 'progressPercent', 'rating', 'reviewText', 'timestamp'
+        ])
+        && data.readerId == readerId && validUsername(data.username)
+        && data.displayName is string && data.displayName.size() <= 40
+        && data.eventType in [
+          'ADDED_TO_LIBRARY', 'STARTED_READING', 'PROGRESS_UPDATED', 'FINISHED_BOOK',
+          'REVIEW_PUBLISHED', 'REVIEW_UPDATED'
+        ]
+        && data.bookId is string && data.bookId.size() > 0 && data.bookId.size() <= 300
+        && data.bookTitle is string && data.bookTitle.size() > 0 && data.bookTitle.size() <= 500
+        && (data.bookThumbnailUrl == null || (data.bookThumbnailUrl is string && data.bookThumbnailUrl.size() <= 2000))
+        && (data.currentPage == null || (data.currentPage is int && data.currentPage >= 0))
+        && (data.progressPercent == null || (data.progressPercent is int && data.progressPercent >= 0 && data.progressPercent <= 100))
+        && (data.rating == null || (data.rating is int && data.rating >= 1 && data.rating <= 5))
+        && (data.reviewText == null || (data.reviewText is string && data.reviewText.size() <= 4000))
+        && ((data.eventType in ['REVIEW_PUBLISHED', 'REVIEW_UPDATED'] && data.rating is int)
+          || (data.eventType in [
+            'ADDED_TO_LIBRARY', 'STARTED_READING', 'PROGRESS_UPDATED', 'FINISHED_BOOK'
+          ] && data.rating == null && data.reviewText == null))
+        && data.timestamp is int;
+    }
+
+    function requestAccepted(uid, otherUid) {
+      return (existsAfter(/databases/$(database)/documents/users/$(uid)/incomingRequests/$(otherUid))
+          && getAfter(/databases/$(database)/documents/users/$(uid)/incomingRequests/$(otherUid)).data.status == 'ACCEPTED')
+        || (existsAfter(/databases/$(database)/documents/users/$(uid)/outgoingRequests/$(otherUid))
+          && getAfter(/databases/$(database)/documents/users/$(uid)/outgoingRequests/$(otherUid)).data.status == 'ACCEPTED');
+    }
+
     match /users/{userId} {
       allow get: if signedInAs(userId);
       allow list: if false;
@@ -131,6 +232,117 @@ service cloud.firestore {
           && request.resource.data.createdAt == resource.data.createdAt;
         allow delete: if signedInAs(userId) && resource.data.reviewerId == userId;
       }
+
+      match /incomingRequests/{senderId} {
+        allow get: if request.auth != null && request.auth.uid in [userId, senderId];
+        allow list: if signedInAs(userId);
+        allow create: if signedInAs(senderId)
+          && validFriendRequest(senderId, userId)
+          && request.resource.data.status == 'PENDING'
+          && exists(/databases/$(database)/documents/publicProfiles/$(userId))
+          && exists(/databases/$(database)/documents/publicProfiles/$(senderId))
+          && requestUsesPublicProfiles();
+        allow update: if validFriendRequest(senderId, userId)
+          && resource.data.senderId == senderId && resource.data.recipientId == userId
+          && ((resource.data.status == 'PENDING'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+              && ((signedInAs(userId) && request.resource.data.status in ['ACCEPTED', 'REJECTED'])
+                || (signedInAs(senderId) && request.resource.data.status == 'CANCELLED')))
+            || (resource.data.status in ['REJECTED', 'CANCELLED']
+              && signedInAs(senderId) && request.resource.data.status == 'PENDING'
+              && !exists(/databases/$(database)/documents/users/$(senderId)/friends/$(userId))
+              && !exists(/databases/$(database)/documents/users/$(userId)/friends/$(senderId))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'createdAt', 'updatedAt', 'senderUsername', 'senderDisplayName', 'senderImageUrl',
+                'recipientUsername', 'recipientDisplayName', 'recipientImageUrl'
+              ])
+              && requestUsesPublicProfiles())
+            || (resource.data.status == 'ACCEPTED'
+              && request.auth != null && request.auth.uid in [senderId, userId]
+              && request.resource.data.status == 'CANCELLED'
+              && !existsAfter(/databases/$(database)/documents/users/$(senderId)/friends/$(userId))
+              && !existsAfter(/databases/$(database)/documents/users/$(userId)/friends/$(senderId))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])));
+        allow delete: if false;
+      }
+
+      match /outgoingRequests/{recipientId} {
+        allow get: if request.auth != null && request.auth.uid in [userId, recipientId];
+        allow list: if signedInAs(userId);
+        allow create: if signedInAs(userId)
+          && validFriendRequest(userId, recipientId)
+          && request.resource.data.status == 'PENDING'
+          && exists(/databases/$(database)/documents/publicProfiles/$(recipientId))
+          && exists(/databases/$(database)/documents/publicProfiles/$(userId))
+          && requestUsesPublicProfiles();
+        allow update: if validFriendRequest(userId, recipientId)
+          && resource.data.senderId == userId && resource.data.recipientId == recipientId
+          && ((resource.data.status == 'PENDING'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+              && ((signedInAs(userId) && request.resource.data.status == 'CANCELLED')
+                || (signedInAs(recipientId) && request.resource.data.status in ['ACCEPTED', 'REJECTED'])))
+            || (resource.data.status in ['REJECTED', 'CANCELLED']
+              && signedInAs(userId) && request.resource.data.status == 'PENDING'
+              && !exists(/databases/$(database)/documents/users/$(userId)/friends/$(recipientId))
+              && !exists(/databases/$(database)/documents/users/$(recipientId)/friends/$(userId))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'status', 'createdAt', 'updatedAt', 'senderUsername', 'senderDisplayName', 'senderImageUrl',
+                'recipientUsername', 'recipientDisplayName', 'recipientImageUrl'
+              ])
+              && requestUsesPublicProfiles())
+            || (resource.data.status == 'ACCEPTED'
+              && request.auth != null && request.auth.uid in [userId, recipientId]
+              && request.resource.data.status == 'CANCELLED'
+              && !existsAfter(/databases/$(database)/documents/users/$(userId)/friends/$(recipientId))
+              && !existsAfter(/databases/$(database)/documents/users/$(recipientId)/friends/$(userId))
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])));
+        allow delete: if false;
+      }
+
+      match /friends/{friendId} {
+        allow get: if request.auth != null && request.auth.uid in [userId, friendId];
+        allow list: if signedInAs(userId);
+        allow create: if request.auth != null
+          && request.auth.uid in [userId, friendId]
+          && request.resource.data.keys().hasOnly(['friendId', 'pairKey', 'createdAt'])
+          && request.resource.data.friendId == friendId
+          && request.resource.data.pairKey is string
+          && request.resource.data.createdAt is int
+          && existsAfter(/databases/$(database)/documents/users/$(friendId)/friends/$(userId))
+          && getAfter(/databases/$(database)/documents/users/$(friendId)/friends/$(userId)).data.friendId == userId
+          && getAfter(/databases/$(database)/documents/users/$(friendId)/friends/$(userId)).data.pairKey == request.resource.data.pairKey
+          && requestAccepted(userId, friendId)
+          && requestAccepted(friendId, userId);
+        allow update: if false;
+        allow delete: if request.auth != null
+          && request.auth.uid in [userId, friendId]
+          && exists(/databases/$(database)/documents/users/$(friendId)/friends/$(userId))
+          && !existsAfter(/databases/$(database)/documents/users/$(friendId)/friends/$(userId));
+      }
+
+      match /activities/{activityId} {
+        allow get, list: if signedIn()
+          && (request.auth.uid == userId
+            || exists(/databases/$(database)/documents/users/$(userId)/friends/$(request.auth.uid)));
+        allow create: if signedInAs(userId) && validActivity(userId);
+        allow update: if signedInAs(userId)
+          && validActivity(userId)
+          && request.resource.data.readerId == resource.data.readerId
+          && request.resource.data.bookId == resource.data.bookId;
+        allow delete: if signedInAs(userId);
+      }
+    }
+
+    match /publicProfiles/{userId} {
+      allow get: if signedIn();
+      allow list: if signedIn() && request.query.limit <= 30;
+      allow create: if signedInAs(userId)
+        && validPublicProfile(userId)
+        && usernameReservedFor(request.resource.data.username, userId);
+      allow update: if signedInAs(userId)
+        && validPublicProfile(userId)
+        && usernameReservedFor(request.resource.data.username, userId);
+      allow delete: if false;
     }
 
     match /bookReviews/{bookKey}/reviews/{reviewerId} {

@@ -14,6 +14,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
+import com.fable.app.domain.model.FableThemeName
 
 @Composable
 fun LoginScreen(
@@ -22,6 +23,8 @@ fun LoginScreen(
     onLogin: (String, String) -> Unit,
     onForgotPassword: () -> Unit,
     onRegister: () -> Unit,
+    currentTheme: FableThemeName,
+    onThemes: () -> Unit,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
@@ -32,6 +35,7 @@ fun LoginScreen(
             AuthSubmitButton("Sign in", state.isLoading) { onLogin(email, password) }
             TextButton(onClick = onForgotPassword) { Text("Forgot password?") }
             TextButton(onClick = onRegister) { Text("Create an account") }
+            TextButton(onClick = onThemes) { Text("Appearance · ${currentTheme.label}") }
         }
     }
 }

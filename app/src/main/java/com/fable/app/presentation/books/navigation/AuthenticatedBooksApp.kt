@@ -12,8 +12,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -23,6 +26,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.fable.app.di.FableDependencies
+import com.fable.app.di.FableViewModelFactory
+import com.fable.app.di.SocialViewModelFactory
+import com.fable.app.domain.model.AuthUser
 import com.fable.app.domain.model.Book
 import com.fable.app.domain.model.UserProfile
 import com.fable.app.presentation.books.details.BookDetailsScreen
@@ -33,6 +39,16 @@ import com.fable.app.presentation.reading.MyLibraryScreen
 import com.fable.app.presentation.reading.ReadingStatisticsScreen
 import com.fable.app.presentation.reading.ReadingHomeScreen
 import com.fable.app.presentation.reviews.MyReviewsScreen
+import com.fable.app.presentation.auth.ProfileSetupScreen
+import com.fable.app.presentation.social.ActivityFeedScreen
+import com.fable.app.presentation.social.DiscoverReadersScreen
+import com.fable.app.presentation.social.FriendRequestsScreen
+import com.fable.app.presentation.social.FriendsScreen
+import com.fable.app.presentation.social.ReaderProfileScreen
+import com.fable.app.presentation.social.SocialViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.fable.app.domain.model.FableThemeName
+import com.fable.app.presentation.theme.ThemeSelectionScreen
 
 private val primaryDestinations = listOf("home", "discover", "search", "library")
 
@@ -41,12 +57,21 @@ fun AuthenticatedBooksApp(
     profile: UserProfile,
     userId: String,
     dependencies: FableDependencies,
+    selectedTheme: FableThemeName,
+    themeMessage: String?,
+    themeError: String?,
+    onSelectTheme: (FableThemeName) -> Unit,
     onLogout: () -> Unit,
 ) {
     val navController = rememberNavController()
+    val socialViewModel: SocialViewModel = viewModel(
+        key = "social-$userId-${profile.updatedAt}-${profile.username}",
+        factory = SocialViewModelFactory(dependencies, userId, profile),
+    )
     val navEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navEntry?.destination?.route
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -92,6 +117,12 @@ fun AuthenticatedBooksApp(
                     onLibrary = { navController.navigate("library") },
                     onStatistics = { navController.navigate("reading-statistics") },
                     onMyReviews = { navController.navigate("my-reviews") },
+                    onDiscoverReaders = { navController.navigate("discover-readers") },
+                    onFriends = { navController.navigate("friends") },
+                    onFriendRequests = { navController.navigate("friend-requests") },
+                    onActivityFeed = { navController.navigate("activity-feed") },
+                    onMyProfile = { openReaderProfile(navController, socialViewModel, userId) },
+                    onSelectTheme = { navController.navigate("themes") },
                     onBookClick = { bookId -> navController.navigate("book/${Uri.encode(bookId)}") },
                 )
             }
@@ -132,6 +163,61 @@ fun AuthenticatedBooksApp(
                     navController.navigate("book/${Uri.encode(bookId)}")
                 }
             }
+            composable("discover-readers") {
+                DiscoverReadersScreen(socialViewModel) { readerId -> openReaderProfile(navController, socialViewModel, readerId) }
+            }
+            composable("friend-requests") { FriendRequestsScreen(socialViewModel) }
+            composable("friends") {
+                FriendsScreen(socialViewModel) { readerId -> openReaderProfile(navController, socialViewModel, readerId) }
+            }
+            composable("activity-feed") {
+                ActivityFeedScreen(
+                    socialViewModel,
+                    onReaderClick = { readerId -> openReaderProfile(navController, socialViewModel, readerId) },
+                    onBookClick = { bookId -> navController.navigate("book/${Uri.encode(bookId)}") },
+                )
+            }
+            composable("themes") {
+                ThemeSelectionScreen(
+                    selectedTheme = selectedTheme,
+                    statusMessage = themeMessage,
+                    errorMessage = themeError,
+                    onSelect = onSelectTheme,
+                    onDone = { navController.popBackStack() },
+                )
+            }
+            composable(
+                route = "reader/{readerId}",
+                arguments = listOf(navArgument("readerId") { type = NavType.StringType }),
+            ) { entry ->
+                val readerId = entry.arguments?.getString("readerId").orEmpty()
+                LaunchedEffect(readerId) { socialViewModel.openProfile(readerId) }
+                ReaderProfileScreen(
+                    viewModel = socialViewModel,
+                    userId = userId,
+                    onEditProfile = { navController.navigate("edit-profile") },
+                    onSelectTheme = { navController.navigate("themes") },
+                    onOpenRequests = { navController.navigate("friend-requests") },
+                )
+            }
+            composable("edit-profile") {
+                val profileViewModel: com.fable.app.presentation.auth.ProfileViewModel = viewModel(
+                    key = "edit-profile-$userId",
+                    factory = FableViewModelFactory(dependencies),
+                )
+                val profileState by profileViewModel.uiState.collectAsStateWithLifecycle()
+                ProfileSetupScreen(
+                    authUser = AuthUser(profile.uid, profile.email),
+                    profile = profile,
+                    state = profileState,
+                    onSave = { username, displayName, bio, genres, imageUrl ->
+                        profileViewModel.saveSetup(AuthUser(profile.uid, profile.email), profile, username, displayName, bio, genres, imageUrl)
+                    },
+                    onLogout = {},
+                    title = "Edit reader profile",
+                    showLogout = false,
+                )
+            }
             composable(
                 route = "book/{bookId}",
                 arguments = listOf(navArgument("bookId") { type = NavType.StringType }),
@@ -140,6 +226,15 @@ fun AuthenticatedBooksApp(
             }
         }
     }
+}
+
+private fun openReaderProfile(
+    navController: androidx.navigation.NavHostController,
+    viewModel: SocialViewModel,
+    readerId: String,
+) {
+    viewModel.openProfile(readerId)
+    navController.navigate("reader/${Uri.encode(readerId)}")
 }
 
 private fun androidx.navigation.NavHostController.openBook(book: Book) {

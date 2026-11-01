@@ -28,8 +28,9 @@ class ProfileViewModel(private val userRepository: UserRepository) : ViewModel()
         displayName: String,
         bio: String,
         favouriteGenres: List<String>,
+        profileImageUrl: String? = existing?.profileImageUrl,
     ) {
-        AuthValidation.validateProfile(username, displayName, bio)?.let {
+        AuthValidation.validateProfile(username, displayName, bio, profileImageUrl)?.let {
             _uiState.value = AuthUiState(error = it)
             return
         }
@@ -46,6 +47,7 @@ class ProfileViewModel(private val userRepository: UserRepository) : ViewModel()
                 username = normalized,
                 displayName = displayName.trim(),
                 bio = bio.trim(),
+                profileImageUrl = profileImageUrl?.trim()?.takeIf(String::isNotBlank),
                 favouriteGenres = favouriteGenres.distinct(),
                 updatedAt = System.currentTimeMillis(),
             )

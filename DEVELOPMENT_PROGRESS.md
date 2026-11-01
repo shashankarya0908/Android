@@ -114,6 +114,108 @@
 - Build used JDK 21, Android SDK 36, Gradle 8.13, and Kotlin 2.4.21. Gradle's Kotlin 2.5 forward-compatibility warning remains non-blocking.
 - No Firebase project configuration or emulator was available. Firestore rules, batch writes, public review reads, and offline synchronization were not verified against a live Firebase project.
 
+## Phase 6 — Social networking
+
+### Completed
+
+- Added an email-free `PublicReaderProfile` model and separate Firestore `publicProfiles/{uid}` mirror with username, display name, bio, HTTPS profile image, favourite genres, and aggregate reading statistics. Existing signed-in accounts are mirrored when their private profile is observed; edits remain owner-scoped through the existing profile repository.
+- Added normalized username-prefix discovery, reader profiles, owner profile editing, friend requests, Friends, and Activity Feed screens integrated into the authenticated navigation and Home.
+- Added mirrored incoming/outgoing friend request documents keyed by participant UIDs. Transactions prevent self/duplicate/already-friends requests, allow accept/reject/cancel, permit retry after rejection/cancellation, and create/remove mirrored friendships atomically.
+- Added friend profile/stat observation and accepted-friend activity subscriptions. Friend statistics are aggregate values derived from synced personal library records; no friend library entries or personal notes are read by social screens.
+- Added stable activity records for library additions, reading starts, 10% (or 10-page) progress milestones, completions, and review publication/updates. Activities are published after successful cloud writes and contain no personal notes. Stable event IDs prevent progress/review edits from producing repeated feed items.
+- Added Firestore rules for public-profile field allowlists, owner edits, request participant/state validation, reciprocal friendship creation/removal, and accepted-friend activity access. Social data is cloud-only; Room remains schema v3 and no migration was needed.
+- Added 13 JVM unit tests for request creation/deduplication and transitions, self/ownership checks, friendship removal logic, public-profile privacy, activity generation/deduplication/filtering, and social error handling.
+
+### Cloud configuration and limits
+
+- No `app/google-services.json`, Firebase project, or emulator was available. Public profile mirrors, Firestore transactions/listeners, activity publishing, and the new security rules are not claimed as live-tested or deployed.
+- Reader discovery is a signed-in prefix search over public profile fields, capped at 30 results. Friends' reading statistics are aggregate counts; detailed reading records remain private.
+- Activity events are generated from confirmed Firestore library/review writes. Feed listeners merge up to 20 recent entries per friend and cap the visible feed at 100 entries.
+- Social data is not cached locally in Room, so Phase 6 introduces no database schema or migration changes. With Firebase unavailable, the UI receives no fabricated readers, requests, friendships, or activity.
+
+### Verification
+
+- `gradlew.bat assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**.
+- 48 JVM unit tests passed; 0 failures, 0 errors, 0 skipped (13 Phase 6 tests; 35 from Phases 1–5).
+- Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
+- Build used JDK 21 and Android SDK 36. Existing non-blocking Gradle 8.13 forward-compatibility warning remains.
+- Firestore rules and live Firebase behavior were not tested against a project or emulator.
+
 ### Remaining phases
 
-Friend requests; activity feed; theme persistence; broader integration testing; public profile privacy rules; release verification.
+Broader integration testing, release verification, and live Firebase/rules verification when project configuration is available.
+
+## Phase 7 — Centralized theming system
+
+### Completed
+
+- Replaced the single shared palette with five complete theme definitions: Gothic, Gothic Romance, Dark Academia, Dreamscape, and Minimalist. Each defines a semantic Material 3 palette, heading/body typography, component shapes, page surface gradient, card border, and theme-specific accent token.
+- Applied the selected theme at the root app level across signed-out authentication and all authenticated navigation destinations. Existing Compose screens consume the active `MaterialTheme`, so book discovery/details, personal library/progress, reviews, reader profiles, friends, and activity update together.
+- Added a theme picker with preview cards built from the real theme definitions. The picker is reachable from sign-in, authenticated Home, and the owner's profile.
+- Added per-user local persistence through SharedPreferences with an isolated anonymous preference for signed-out use. When Firebase is configured, choices also sync through the existing private `UserProfile.selectedTheme` field. Pending device selections remain active on cloud failure and are retried on a later profile/session restore.
+- Kept `selectedTheme` backward-compatible: missing or unknown values restore as Minimalist. No Room schema, migration, Firestore rules, or public-profile fields needed to change.
+- Added JVM tests for all theme definitions, legacy/default selection, account preference isolation, signed-out restore, local pending preference priority, profile sync, retry behavior, cloud failure handling, and local fallback messaging.
+- Updated README and architecture documentation.
+
+### Cloud configuration and limits
+
+- No `app/google-services.json` or Firebase project is configured. The app's theme picker and device persistence work without Firebase; account-level profile sync and cross-device restoration are not live-verified.
+- A cloud write failure leaves the chosen theme saved locally and records the pending sync state. Retry occurs when the profile/session is restored; automatic background retry while remaining in the same session is not implemented.
+- JVM tests verify theme definitions and preference/view-model behavior, not Compose rendering on a device or deployed Firestore rules.
+
+### Verification
+
+- `gradlew.bat assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**.
+- 57 JVM unit tests passed; 0 failures, 0 errors, 0 skipped.
+- Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
+- Build used JDK 21 and Android SDK 36. Gradle 8.13 emitted the existing non-blocking forward-compatibility warning for a future Kotlin 2.5 requirement.
+- Firebase profile synchronization and all live Firebase features remain unverified without project configuration.
+
+## Phase 8 — Integration audit and demo readiness
+
+### Completed
+
+- Audited the existing auth/profile, Google Books, Room cache, library/progress, review, social, activity, theme, navigation, repository, schema/migration, and Firestore rules paths without recreating the app or changing its database schema.
+- Confirmed account-owned Room library/review rows and theme preferences use UID-scoped keys; the anonymous theme key is separate. Book metadata and search history remain device-wide caches.
+- Fixed a review error-state defect: Firestore review snapshot listener errors were ignored and could look like an empty feed. Both book review and personal review listeners now propagate listener errors to the ViewModel. Previously received cached reviews remain in UI state when the ViewModel shows the error.
+- Added a regression test for a review-feed failure after a cached review emission.
+- Installed and launched the debug APK on the `Medium_Phone` emulator. The accessibility hierarchy showed the signed-out login UI and the Firebase setup notice; no app-process fatal exception was observed. Screenshot capture was black and touch navigation could not be reliably verified, so this is a limited launch smoke check, not full UI validation.
+- Added the lecturer workflow and detailed coverage/limitations checklist in `PHASE_8_TEST_REPORT.md`.
+
+### Verification
+
+- `gradlew.bat assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**.
+- 58 JVM unit tests passed; 0 failures, 0 errors, 0 skipped.
+- `git diff --check` — passed (Git line-ending conversion warnings only; no whitespace errors). No other Git operations were performed.
+- Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
+
+### Remaining limitations
+
+- Firebase configuration is absent. Authentication, Firestore writes/reads, deployed rules, account switching with real accounts, sync/reconnect, friend-only visibility, and cloud theme synchronization were not live-tested.
+- The anonymous Google Books quota was rate-limited in Phase 3. Phase 8 did not repeat requests to avoid unnecessary quota usage. Search mapping, errors, and cache fallback are unit-tested, but successful live search, pagination, and cover loading need a configured API/quota.
+- Full device UI interaction, visual rendering, and lecturer demonstration of authenticated workflows still require manual verification on a configured device/project.
+- Phase 8 was complete before the final packaging phase.
+
+## Phase 9 — Final release, documentation, GitHub, and viva preparation
+
+### Completed
+
+- Audited repository history, branch, remote, working-tree changes, ignore rules, and credential-file patterns before packaging. Local `main` and `origin/main` began at Phase 5 commit `03f2a248`; the Phase 6–8 implementation was present locally. The configured remote matches the requested GitHub repository.
+- Prepared a project report, final test report, lecturer demonstration guide, and viva preparation document grounded in the implemented code and explicit about cloud/API verification limits.
+- Updated the README and this progress log for the final project state.
+- Created an editable 12-slide university presentation. The available headless emulator screenshots were not usable, so no mockup is presented as a real app capture.
+- Final clean build, package/version and APK checks, one final commit, and normal fast-forward push are recorded after validation below.
+
+### Final verification
+
+- `gradlew.bat clean assembleDebug testDebugUnitTest` — **BUILD SUCCESSFUL**.
+- 58 JVM unit tests passed; 0 failures, 0 errors, 0 skipped.
+- APK `app/build/outputs/apk/debug/app-debug.apk`; package `com.fable.app`, version `1` / `0.1.0`, size `19,712,876` bytes.
+- Presentation package/layout validation passed with 12 slides and 0 reported layout findings.
+- GitHub result is provided in the final handoff; no history reset or force push is used.
+
+### Remaining limitations
+
+- Firebase project configuration is unavailable; live account and Firestore behaviors/security rules remain unverified.
+- Successful Google Books live retrieval remains unverified; a prior anonymous request hit HTTP 429 quota limits.
+- The headless emulator produced a black screenshot and unreliable touch input; manual visual/device verification remains advisable.

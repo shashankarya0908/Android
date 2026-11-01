@@ -12,8 +12,10 @@ import com.fable.app.data.remote.firestore.toUserBookDtoOrNull
 import com.fable.app.domain.model.Book
 import com.fable.app.domain.model.ReadingStatus
 import com.fable.app.domain.model.ReadingSyncState
+import com.fable.app.domain.model.PublicReaderProfile
 import com.fable.app.domain.model.UserBook
 import com.fable.app.domain.model.calculateReadingStatistics
+import com.fable.app.domain.model.generateLibraryActivities
 import com.fable.app.domain.model.moveUserBook
 import com.fable.app.domain.model.withProgress
 import com.fable.app.domain.repository.ReadingRepository
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.concurrent.ConcurrentHashMap
 
 class FirestoreReadingRepository(
@@ -60,6 +63,7 @@ class FirestoreReadingRepository(
                             snapshot.documents.mapNotNull { it.toUserBookDtoOrNull() },
                             isServerSnapshot = !snapshot.metadata.isFromCache,
                         )
+                        if (!snapshot.metadata.isFromCache) refreshPublicReadingStats(userId)
                         pushPending(userId)
                     }
                 }
@@ -121,6 +125,8 @@ class FirestoreReadingRepository(
                             if (task.isSuccessful) {
                                 if (entry.deleted) dao.removeDeletedLibraryEntryIfCurrent(userId, entry.bookId, entry.updatedAt)
                                 else dao.markLibrarySynced(userId, entry.bookId, entry.updatedAt)
+                                refreshPublicReadingStats(userId)
+                                if (!entry.deleted) publishLibraryActivities(entry.toDomain())
                                 val stillPending = dao.getAllLibraryEntries(userId).any(LibraryCacheEntity::syncPending)
                                 if (!stillPending) syncState(userId).value = ReadingSyncState()
                             } else {
@@ -153,6 +159,59 @@ class FirestoreReadingRepository(
                 .forEach { dao.removeLibraryEntry(userId, it.bookId) }
         }
     }
+
+    private suspend fun refreshPublicReadingStats(userId: String) {
+        runCatching {
+            val records = dao.getAllLibraryEntries(userId)
+                .filter { !it.deleted && !it.syncPending }
+                .map(LibraryCacheEntity::toDomain)
+            val stats = calculateReadingStatistics(records)
+            firestore.collection("publicProfiles").document(userId).update(
+                mapOf(
+                    "completedBooks" to stats.totalBooksCompleted,
+                    "pagesRead" to stats.totalPagesRead,
+                    "currentlyReading" to stats.currentlyReadingCount,
+                    "wantToRead" to stats.wantToReadCount,
+                ),
+            ).await()
+        }
+    }
+
+    private suspend fun publishLibraryActivities(book: UserBook) {
+        runCatching {
+            val profileSnapshot = firestore.collection("publicProfiles").document(book.userId).get().await()
+            val username = profileSnapshot.getString("username") ?: return
+            val profile = PublicReaderProfile(
+                uid = book.userId,
+                username = username,
+                displayName = profileSnapshot.getString("displayName") ?: username,
+            )
+            val activityCollection = firestore.collection("users").document(book.userId).collection("activities")
+            generateLibraryActivities(profile, book).forEach { activity ->
+                val document = activityCollection.document(activityDocumentId(activity.id))
+                if (!document.get().await().exists()) document.set(activity.toFirestoreMap()).await()
+            }
+        }
+    }
+
+    private fun com.fable.app.domain.model.ReaderActivity.toFirestoreMap(): Map<String, Any?> = mapOf(
+        "readerId" to readerId,
+        "username" to username,
+        "displayName" to displayName,
+        "eventType" to eventType.name,
+        "bookId" to bookId,
+        "bookTitle" to bookTitle,
+        "bookThumbnailUrl" to bookThumbnailUrl,
+        "currentPage" to currentPage,
+        "progressPercent" to progressPercent,
+        "rating" to null,
+        "reviewText" to null,
+        "timestamp" to timestamp,
+    )
+
+    private fun activityDocumentId(value: String): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
 
     private fun nextTimestamp(previous: Long?): Long {
         val wallClock = System.currentTimeMillis()

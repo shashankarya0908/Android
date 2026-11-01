@@ -22,6 +22,7 @@ class FirestoreUserRepository(
                     close(error)
                 } else {
                     trySend(snapshot?.takeIf { it.exists() }?.toUserProfile())
+                    snapshot?.takeIf { it.exists() }?.toUserProfile()?.let(::ensurePublicProfileMirror)
                 }
             }
         awaitClose { registration.remove() }
@@ -31,6 +32,7 @@ class FirestoreUserRepository(
         val normalized = profile.username.trim().lowercase()
         val usernameRef = firestore.collection(USERNAMES).document(normalized)
         val userRef = firestore.collection(USERS).document(profile.uid)
+        val publicProfileRef = firestore.collection(PUBLIC_PROFILES).document(profile.uid)
         firestore.runTransaction { transaction ->
             val usernameSnapshot = transaction.get(usernameRef)
             val userSnapshot = transaction.get(userRef)
@@ -38,6 +40,7 @@ class FirestoreUserRepository(
             if (userSnapshot.exists()) throw IllegalStateException("A profile already exists for this account.")
             transaction.set(usernameRef, mapOf("uid" to profile.uid, "username" to normalized))
             transaction.set(userRef, profile.toCreateMap(normalized))
+            transaction.set(publicProfileRef, profile.toPublicMap(normalized))
             null
         }.await()
     }
@@ -47,11 +50,13 @@ class FirestoreUserRepository(
         val userRef = firestore.collection(USERS).document(profile.uid)
         val oldUsernameRef = firestore.collection(USERNAMES).document(previousUsername.trim().lowercase())
         val newUsernameRef = firestore.collection(USERNAMES).document(normalized)
+        val publicProfileRef = firestore.collection(PUBLIC_PROFILES).document(profile.uid)
         firestore.runTransaction { transaction ->
             val userSnapshot = transaction.get(userRef)
             val oldUsernameSnapshot = transaction.get(oldUsernameRef)
             val newUsernameSnapshot = if (oldUsernameRef == newUsernameRef) oldUsernameSnapshot
                 else transaction.get(newUsernameRef)
+            val publicProfileSnapshot = transaction.get(publicProfileRef)
 
             if (!userSnapshot.exists()) throw IllegalStateException("Your profile could not be found.")
             if (newUsernameSnapshot.exists() && newUsernameSnapshot.getString("uid") != profile.uid) {
@@ -63,6 +68,9 @@ class FirestoreUserRepository(
                 transaction.set(newUsernameRef, mapOf("uid" to profile.uid, "username" to normalized))
             }
             transaction.update(userRef, profile.toUpdateMap(normalized))
+            val preservedStats = listOf("completedBooks", "pagesRead", "currentlyReading", "wantToRead")
+                .associateWith { publicProfileSnapshot.getLong(it) ?: 0L }
+            transaction.set(publicProfileRef, profile.toPublicMap(normalized) + preservedStats)
             null
         }.await()
     }
@@ -92,6 +100,31 @@ class FirestoreUserRepository(
         "updatedAt" to FieldValue.serverTimestamp(),
     )
 
+    private fun UserProfile.toPublicMap(normalizedUsername: String): Map<String, Any?> = mapOf(
+        "uid" to uid,
+        "username" to normalizedUsername,
+        "usernameNormalized" to normalizedUsername,
+        "displayName" to displayName.trim(),
+        "bio" to bio,
+        "profileImageUrl" to profileImageUrl,
+        "favouriteGenres" to favouriteGenres,
+        "completedBooks" to 0L,
+        "pagesRead" to 0L,
+        "currentlyReading" to 0L,
+        "wantToRead" to 0L,
+        "updatedAt" to System.currentTimeMillis(),
+    )
+
+    private fun ensurePublicProfileMirror(profile: UserProfile) {
+        val publicRef = firestore.collection(PUBLIC_PROFILES).document(profile.uid)
+        publicRef.get().addOnSuccessListener { snapshot ->
+            if (!snapshot.exists()) {
+                publicRef.set(profile.toPublicMap(profile.username.trim().lowercase()),
+                    com.google.firebase.firestore.SetOptions.merge())
+            }
+        }
+    }
+
     private fun com.google.firebase.firestore.DocumentSnapshot.toUserProfile(): UserProfile {
         fun timestampMillis(key: String) = (getTimestamp(key) ?: Timestamp.now()).toDate().time
         return UserProfile(
@@ -115,5 +148,6 @@ class FirestoreUserRepository(
     private companion object {
         const val USERS = "users"
         const val USERNAMES = "usernames"
+        const val PUBLIC_PROFILES = "publicProfiles"
     }
 }

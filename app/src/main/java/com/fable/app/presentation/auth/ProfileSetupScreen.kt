@@ -28,12 +28,15 @@ fun ProfileSetupScreen(
     authUser: AuthUser,
     profile: UserProfile?,
     state: AuthUiState,
-    onSave: (String, String, String, List<String>) -> Unit,
+    onSave: (String, String, String, List<String>, String?) -> Unit,
     onLogout: () -> Unit,
+    title: String = "Set up your profile",
+    showLogout: Boolean = true,
 ) {
     var username by rememberSaveable(profile?.username) { mutableStateOf(profile?.username.orEmpty()) }
     var displayName by rememberSaveable(profile?.displayName) { mutableStateOf(profile?.displayName.orEmpty()) }
     var bio by rememberSaveable(profile?.bio) { mutableStateOf(profile?.bio.orEmpty()) }
+    var profileImageUrl by rememberSaveable(profile?.profileImageUrl) { mutableStateOf(profile?.profileImageUrl.orEmpty()) }
     var selectedGenres by rememberSaveable(profile?.favouriteGenres) {
         mutableStateOf(profile?.favouriteGenres.orEmpty())
     }
@@ -42,9 +45,10 @@ fun ProfileSetupScreen(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        AuthPage("Set up your profile", "A few details help other readers get to know you.", true, state) {
+        AuthPage(title, "A few details help other readers get to know you.", true, state) {
             AuthTextField(username, { username = it }, "Username")
             AuthTextField(displayName, { displayName = it }, "Display name")
+            AuthTextField(profileImageUrl, { profileImageUrl = it }, "Profile image URL (HTTPS, optional)")
             OutlinedTextField(
                 value = bio,
                 onValueChange = { bio = it },
@@ -65,9 +69,9 @@ fun ProfileSetupScreen(
                 )
             }
             AuthSubmitButton("Save profile", state.isLoading) {
-                onSave(username, displayName, bio, selectedGenres)
+                onSave(username, displayName, bio, selectedGenres, profileImageUrl)
             }
-            TextButton(onClick = onLogout) { Text("Sign out") }
+            if (showLogout) TextButton(onClick = onLogout) { Text("Sign out") }
             Text("Signed in as ${authUser.email}")
         }
     }

@@ -4,7 +4,27 @@ Fable is an Android social reading app for discovering books, tracking a persona
 
 ## Current status
 
-Phases 1–5 are implemented. Email/password flows and profile persistence use Firebase Auth and Cloud Firestore when configured. The app remains buildable without Firebase credentials and clearly reports that account actions require setup. Live Firebase behavior has not been verified because this workspace has no Firebase project configuration. Authenticated users also have Google Books discovery, search, genre exploration, book details, cached search pages, recent searches, personal shelves, a reading tracker, and book ratings/reviews.
+Phases 1–9 are complete. Fable is a Kotlin and Jetpack Compose Android app for discovering books, maintaining a personal reading library, reviewing books, and connecting with readers. Phase 9 packages the final documentation and viva materials. The app builds without Firebase credentials, but this workspace has no Firebase configuration, so account and cloud features are not live-verified.
+
+## Problem and project goals
+
+Book discovery, personal tracking, reviews, and reader communities are often split across separate services. Fable demonstrates a single Android application that brings these reading activities together while keeping personal reading records private and presenting social profile information separately. The project goals are to support book discovery, a UID-scoped library and progress tracker, ratings/reviews, reader profiles and friend activity, and persistent visual theme selection using a clear MVVM/repository architecture.
+
+## Architecture overview
+
+```text
+Jetpack Compose screens and Navigation
+                ↓
+          ViewModels / UI state
+                ↓
+      Domain models and repositories
+          ↙                  ↘
+ Room local cache          Data adapters
+                         Firebase Auth/Firestore
+                         Google Books API
+```
+
+Room stores cached books, search history, user-scoped library records, and review records. Firebase-backed repositories own account, profile, reading, review, and social synchronization. Google Books is accessed through Retrofit. Local code and automated tests are present for these flows, but the cloud services require their own configuration and have not been live-verified here. See [ARCHITECTURE.md](ARCHITECTURE.md) for data flows and boundaries.
 
 ## Features implemented
 
@@ -20,6 +40,11 @@ Phases 1–5 are implemented. Email/password flows and profile persistence use F
 - Personal Want to Read, Currently Reading, and Read shelves with library search, category filters, sorting, moves, removals, and book-detail links.
 - Per-user reading progress, notes, dates, completion history, locally cached edits, and reading statistics calculated from saved library entries.
 - One 1–5-star rating and optional written review per user and book, with edit/delete, book detail summaries, and personal review history.
+- Public reader profiles with username search, display name, bio, HTTPS profile image, favourite genres, and reading statistics derived from saved library records. Email and authentication data stay in the private owner profile.
+- Friend requests with accept/reject/cancel, duplicate and self-request prevention, accepted friends, and friend removal.
+- Activity feed from accepted friends for library additions, reading starts, progress milestones, completions, and published/updated reviews. Personal notes are not included; progress events use stable milestones to avoid minor-update spam.
+- Five centralized app themes: Gothic, Gothic Romance, Dark Academia, Dreamscape, and Minimalist. Each changes the color palette, typography, component shapes, page surfaces, and theme-specific accents. Theme previews and selection are available from sign-in and authenticated Home/profile.
+- Theme choice saves immediately in a per-user local preference, including a separate anonymous preference when signed out. If Firebase is configured, the choice also updates the existing private `UserProfile.selectedTheme` field. Local selection remains usable if cloud sync fails; pending sync is retried on a later session restore. No Room schema change is needed.
 
 ## Technology
 
@@ -42,12 +67,22 @@ Phases 1–5 are implemented. Email/password flows and profile persistence use F
 ### Firestore schema
 
 - `users/{uid}`: the authenticated user's profile fields (`uid`, `username`, `displayName`, `email`, `bio`, `profileImageUrl`, `favouriteGenres`, `favouriteBooks`, `selectedTheme`, `createdAt`, `updatedAt`). Only the owner can read or change the profile in this phase.
+- `selectedTheme` is the existing private profile field used for cloud preference sync. It stores a theme name; older or unknown values fall back to Minimalist. The public profile and Firestore rules do not need theme-specific changes.
 - `usernames/{normalizedUsername}`: a private uniqueness claim containing the owning `uid` and normalized username. Authenticated clients can get a claim for reservation checks, but cannot list claims. Create/delete is restricted to the owning authenticated account. Profile writes and username claims are checked atomically by Firestore rules using `getAfter()`.
 - Passwords are managed only by Firebase Authentication and are never written to Firestore.
 - `bookReviews/{bookKey}/reviews/{uid}`: a signed-in-readable review/rating record keyed by stable book hash and reviewer UID. A user may create, edit, or delete only their own record. Average and count are calculated from the current review records.
 - `users/{uid}/reviews/{bookKey}`: a private mirror for the user's review history. Batch writes keep the public book view and private history copy together.
 
-The current rules intentionally do not expose profiles publicly. Public profile reads will need a separate privacy design in the social phase.
+### Social schema
+
+- `publicProfiles/{uid}`: only public reader fields (`uid`, normalized username, display name, bio, HTTPS profile image URL, favourite genres, aggregate reading counts, and update time). It never contains email, passwords, private notes, or auth tokens. Existing signed-in profiles get this mirror when their private profile is observed.
+- `users/{recipientUid}/incomingRequests/{senderUid}` and `users/{senderUid}/outgoingRequests/{recipientUid}`: mirrored request state with deterministic participant IDs. Transactions keep both copies in step; rejected and cancelled requests can be sent again, while pending requests and existing friendships prevent duplicates.
+- `users/{uid}/friends/{friendUid}`: mirrored friendship records keyed by the other authenticated UID. Accept creates both records and remove deletes both in a transaction.
+- `users/{readerUid}/activities/{activityId}`: stable-ID activity records written after a library/review cloud write succeeds. Rules allow reads only to that reader and accepted friends. This is a live Firestore feature; it is not represented by demo content.
+
+Social records remain in Firestore, so Phase 6 does not change the Room schema or require a Room migration. Public aggregate statistics are updated from synced library records. Activity events omit personal notes.
+
+`firestore.rules` restricts owner profile edits, exposes only the separate `publicProfiles` field allowlist to signed-in readers, validates request participants and state transitions, requires reciprocal accepted-request state for mirrored friendships, and limits activity reads to accepted friends. These rules are source code only; no Firebase configuration was available to deploy or live-test them.
 
 ## Reviews and ratings
 
@@ -74,14 +109,25 @@ Open this folder in Android Studio, sync Gradle, and use JDK 17 or later. The pr
 PowerShell:
 
 ```powershell
+.\gradlew.bat clean assembleDebug testDebugUnitTest
+.\gradlew.bat installDebug
+```
+
+For a quicker incremental build, run:
+
+```powershell
 .\gradlew.bat :app:assembleDebug
 .\gradlew.bat :app:testDebugUnitTest
 ```
 
 The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
 
-35 JVM unit tests cover authentication/profile behavior, book discovery, reading shelves/progress, and Phase 5 review creation, editing, deletion, uniqueness, ownership, rating summaries, empty state, and UI error presentation. Tests do not prove live Firebase behavior or a successful live Google Books response.
+58 JVM unit tests cover authentication/profile behavior, book discovery, reading shelves/progress, reviews, Phase 6 social behavior, and Phase 7 theme definitions, per-user preference restoration, local fallback, and cloud-sync state. The Phase 8 regression test checks that a failed review feed is surfaced while cached reviews remain visible. Tests do not prove live Firebase behavior, deployed security rules, or a successful live Google Books response. See [FINAL_TEST_REPORT.md](FINAL_TEST_REPORT.md) and [PHASE_8_TEST_REPORT.md](PHASE_8_TEST_REPORT.md) for tested scope and manual checks.
+
+## Demonstration and screenshots
+
+Use [FABLE_DEMO_GUIDE.md](FABLE_DEMO_GUIDE.md) for a five-to-seven-minute lecturer sequence. No genuine application screenshots were available for inclusion in this README or the presentation: the available headless emulator screenshot was black, and touch interaction was unreliable. The demo guide includes a manual screenshot checklist. Do not use generated mockups as screenshots of the running app.
 
 ## Remaining work
 
-Friend requests, activity feed, theme persistence, broader integration testing, and public profile privacy rules are planned for later phases.
+Lecturer demonstrations of authenticated workflows require a configured Firebase project, deployed rules, at least two test accounts for social flows, and working Google Books quota. Without that configuration, the sign-in screen remains usable for viewing theme selection, but real account, library, review, and social actions are intentionally unavailable. Further limitations are recorded in [FINAL_PROJECT_REPORT.md](FINAL_PROJECT_REPORT.md).

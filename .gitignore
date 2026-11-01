@@ -5,6 +5,8 @@
 /.idea/
 /build/
 /app/build/
+/.phase9-build/
+/.phase9-output/
 /captures/
 .externalNativeBuild/
 .cxx/

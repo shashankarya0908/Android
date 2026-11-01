@@ -11,6 +11,9 @@ import com.fable.app.data.remote.firestore.toEntity
 import com.fable.app.data.remote.firestore.toFirestoreMap
 import com.fable.app.domain.model.Book
 import com.fable.app.domain.model.BookReview
+import com.fable.app.domain.model.PublicReaderProfile
+import com.fable.app.domain.model.ReaderActivity
+import com.fable.app.domain.model.generateReviewActivity
 import com.fable.app.domain.model.createOrUpdateBookReview
 import com.fable.app.domain.model.markBookReviewDeleted
 import com.fable.app.domain.repository.ReviewRepository
@@ -24,6 +27,7 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 class FirestoreReviewRepository(
     private val firestore: FirebaseFirestore,
@@ -38,7 +42,9 @@ class FirestoreReviewRepository(
         }
         val collection = firestore.collection("bookReviews").document(reviewCollectionId(bookId)).collection("reviews")
         val listener = collection.addSnapshotListener { snapshot, error ->
-            if (error == null && snapshot != null) {
+            if (error != null) {
+                close(error)
+            } else if (snapshot != null) {
                 syncScope.launch {
                     runCatching {
                         reconcile(bookId, snapshot.documents.mapNotNull { it.toBookReviewDtoOrNull() }, !snapshot.metadata.isFromCache)
@@ -57,7 +63,9 @@ class FirestoreReviewRepository(
         }
         val collection = firestore.collection("users").document(userId).collection("reviews")
         val listener = collection.addSnapshotListener { snapshot, error ->
-            if (error == null && snapshot != null) {
+            if (error != null) {
+                close(error)
+            } else if (snapshot != null) {
                 syncScope.launch {
                     val remote = snapshot.documents.mapNotNull { it.toBookReviewDtoOrNull() }.filter { it.reviewerId == userId }
                     runCatching { reconcile(userId, remote, !snapshot.metadata.isFromCache, userScope = true) }
@@ -130,8 +138,13 @@ class FirestoreReviewRepository(
                         syncScope.launch {
                             try {
                                 if (task.isSuccessful) {
-                                    if (entity.deleted) dao.removeDeletedBookReviewIfCurrent(entity.userId, entity.bookId, entity.updatedAt)
-                                    else dao.markBookReviewSynced(entity.userId, entity.bookId, entity.updatedAt)
+                                    if (entity.deleted) {
+                                        dao.removeDeletedBookReviewIfCurrent(entity.userId, entity.bookId, entity.updatedAt)
+                                        removeReviewActivity(entity.userId, entity.bookId)
+                                    } else {
+                                        dao.markBookReviewSynced(entity.userId, entity.bookId, entity.updatedAt)
+                                        publishReviewActivity(entity.toDomain())
+                                    }
                                 }
                             } catch (_: Exception) {
                                 // Keep the durable Room entry pending when local acknowledgement fails.
@@ -167,6 +180,49 @@ class FirestoreReviewRepository(
                 .forEach { dao.removeBookReview(it.userId, it.bookId) }
         }
     }
+
+    private suspend fun publishReviewActivity(review: BookReview) {
+        runCatching {
+            val profileSnapshot = firestore.collection("publicProfiles").document(review.reviewerId).get().await()
+            val username = profileSnapshot.getString("username") ?: return
+            val activity = generateReviewActivity(
+                PublicReaderProfile(
+                    uid = review.reviewerId,
+                    username = username,
+                    displayName = profileSnapshot.getString("displayName") ?: username,
+                ),
+                review,
+            )
+            firestore.collection("users").document(review.reviewerId).collection("activities")
+                .document(activityDocumentId(activity.id)).set(activity.toFirestoreMap()).await()
+        }
+    }
+
+    private suspend fun removeReviewActivity(userId: String, bookId: String) {
+        runCatching {
+            firestore.collection("users").document(userId).collection("activities")
+                .document(activityDocumentId("review:$bookId")).delete().await()
+        }
+    }
+
+    private fun ReaderActivity.toFirestoreMap(): Map<String, Any?> = mapOf(
+        "readerId" to readerId,
+        "username" to username,
+        "displayName" to displayName,
+        "eventType" to eventType.name,
+        "bookId" to bookId,
+        "bookTitle" to bookTitle,
+        "bookThumbnailUrl" to bookThumbnailUrl,
+        "currentPage" to currentPage,
+        "progressPercent" to progressPercent,
+        "rating" to rating,
+        "reviewText" to reviewText,
+        "timestamp" to timestamp,
+    )
+
+    private fun activityDocumentId(value: String): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
 
     private fun nextTimestamp(previous: Long?): Long {
         val now = System.currentTimeMillis()
