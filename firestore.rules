@@ -1,0 +1,119 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedInAs(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validUsername(username) {
+      return username is string && username.matches('^[a-z0-9_]{3,20}$');
+    }
+
+    function usernameReservedFor(username, userId) {
+      let reservation = getAfter(/databases/$(database)/documents/usernames/$(username));
+      return reservation.data.uid == userId && reservation.data.username == username;
+    }
+
+    function profileUsesUsernameAfter(username, userId) {
+      let profile = getAfter(/databases/$(database)/documents/users/$(userId));
+      return profile.data.uid == userId && profile.data.username == username;
+    }
+
+    function profileReleasedUsernameAfter(username, userId) {
+      return existsAfter(/databases/$(database)/documents/users/$(userId))
+        && getAfter(/databases/$(database)/documents/users/$(userId)).data.username != username;
+    }
+
+    function validProfile(userId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'uid', 'username', 'displayName', 'email', 'bio', 'profileImageUrl',
+          'favouriteGenres', 'favouriteBooks', 'selectedTheme', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'username', 'displayName', 'email', 'bio', 'profileImageUrl',
+          'favouriteGenres', 'favouriteBooks', 'selectedTheme', 'createdAt', 'updatedAt'
+        ])
+        && data.uid == userId
+        && validUsername(data.username)
+        && data.displayName is string
+        && data.displayName.size() >= 2
+        && data.displayName.size() <= 40
+        && data.email is string
+        && (data.bio == null || (data.bio is string && data.bio.size() <= 280))
+        && (data.profileImageUrl == null || data.profileImageUrl is string)
+        && data.favouriteGenres is list
+        && data.favouriteBooks is list
+        && data.selectedTheme is string
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function validUserBook(userId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'userId', 'bookId', 'bookSnapshot', 'status', 'currentPage', 'totalPages',
+          'startedAt', 'finishedAt', 'addedAt', 'updatedAt', 'personalNotes', 'completionHistory'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'bookId', 'bookSnapshot', 'status', 'currentPage', 'totalPages',
+          'startedAt', 'finishedAt', 'addedAt', 'updatedAt', 'personalNotes', 'completionHistory'
+        ])
+        && data.userId == userId
+        && data.bookId is string && data.bookId.size() > 0 && data.bookId.size() <= 300
+        && data.bookSnapshot is string && data.bookSnapshot.size() <= 60000
+        && data.status in ['WANT_TO_READ', 'CURRENTLY_READING', 'READ']
+        && (data.status != 'READ' || data.finishedAt is int)
+        && (data.status == 'READ' || data.finishedAt == null)
+        && data.currentPage is int && data.currentPage >= 0
+        && (data.totalPages == null || (data.totalPages is int && data.totalPages > 0))
+        && (data.totalPages == null || data.currentPage <= data.totalPages)
+        && (data.startedAt == null || data.startedAt is int)
+        && (data.finishedAt == null || data.finishedAt is int)
+        && data.addedAt is int && data.updatedAt is int
+        && (data.personalNotes == null || (data.personalNotes is string && data.personalNotes.size() <= 5000))
+        && data.completionHistory is list
+        && data.completionHistory.size() <= 100;
+    }
+
+    match /users/{userId} {
+      allow get: if signedInAs(userId);
+      allow list: if false;
+      allow create: if signedInAs(userId)
+        && validProfile(userId)
+        && usernameReservedFor(request.resource.data.username, userId);
+      allow update: if signedInAs(userId)
+        && validProfile(userId)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt
+        && usernameReservedFor(request.resource.data.username, userId);
+      allow delete: if false;
+
+      match /library/{entryId} {
+        allow get, list: if signedInAs(userId);
+        allow create: if signedInAs(userId) && validUserBook(userId);
+        allow update: if signedInAs(userId)
+          && validUserBook(userId)
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.bookId == resource.data.bookId
+          && request.resource.data.addedAt == resource.data.addedAt;
+        allow delete: if signedInAs(userId) && resource.data.userId == userId;
+      }
+    }
+
+    match /usernames/{username} {
+      allow get: if request.auth != null;
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['uid', 'username'])
+        && request.resource.data.uid == request.auth.uid
+        && validUsername(username)
+        && request.resource.data.username == username
+        && profileUsesUsernameAfter(username, request.auth.uid);
+      allow update: if false;
+      allow delete: if request.auth != null
+        && resource.data.uid == request.auth.uid
+        && profileReleasedUsernameAfter(username, request.auth.uid);
+    }
+  }
+}

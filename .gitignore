@@ -1,0 +1,33 @@
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+/.idea/
+/build/
+/app/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+google-services.json
+secrets.properties
+key.properties
+
+# Local credentials, signing material, and environment-specific secrets.
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*service-account*.json
+firebase-debug.log
+.firebase/
+
+# Generated Android packages and operating-system metadata.
+*.apk
+*.aab
+.DS_Store
+Thumbs.db
