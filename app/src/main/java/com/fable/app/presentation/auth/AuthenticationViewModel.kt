@@ -61,30 +61,39 @@ class AuthenticationViewModel(
         registrationInProgress,
     ) { authUser, registrationPending -> authUser to registrationPending }
         .flatMapLatest { (authUser, registrationPending) ->
-            if (authUser == null) flowOf(SessionState.SignedOut)
-            else if (registrationPending) flowOf(SessionState.Loading)
-            else ObserveUserProfile(userRepository)(authUser.uid)
-                .map { profile ->
-                    when {
-                        profile == null -> SessionState.ProfileSetup(authUser, null)
-                        !profile.profileSetupComplete -> SessionState.ProfileSetup(authUser, profile)
-                        else -> SessionState.Ready(profile, authUser.uid)
+            if (authUser == null) {
+                AuthLogger.log("Auth session observed", "SignedOut")
+                flowOf(SessionState.SignedOut)
+            } else if (registrationPending) {
+                flowOf(SessionState.Loading)
+            } else {
+                AuthLogger.log("Auth session observed", "User authenticated: ${authUser.uid}")
+                ObserveUserProfile(userRepository)(authUser.uid)
+                    .map { profile ->
+                        when {
+                            profile == null -> SessionState.ProfileSetup(authUser, null)
+                            !profile.profileSetupComplete -> SessionState.ProfileSetup(authUser, profile)
+                            else -> SessionState.Ready(profile, authUser.uid)
+                        }
                     }
-                }
-                .onStart { emit(SessionState.Loading) }
+                    .onStart { emit(SessionState.Loading) }
+            }
         }
-        .catch { emit(SessionState.Failed(it.toUserMessage())) }
+        .catch {
+            AuthLogger.logError("sessionState flow", it)
+            emit(SessionState.Failed(it.toUserMessage()))
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SessionState.Loading)
 
     fun login(email: String, password: String) {
         AuthValidation.validateLogin(email, password)?.let { return showError(it) }
-        runAction { loginUseCase(email, password) }
+        runAction("login") { loginUseCase(email, password) }
     }
 
     fun register(username: String, displayName: String, email: String, password: String, confirmPassword: String) {
         AuthValidation.validateRegistration(username, displayName, email, password, confirmPassword)
             ?.let { return showError(it) }
-        runAction {
+        runAction("register") {
             registrationInProgress.value = true
             try {
                 registerUseCase(email, password, AuthValidation.normalizeUsername(username), displayName)
@@ -97,27 +106,30 @@ class AuthenticationViewModel(
 
     fun requestPasswordReset(email: String) {
         AuthValidation.validateEmail(email)?.let { return showError(it) }
-        runAction {
+        runAction("passwordReset") {
             resetUseCase(email)
             _uiState.value = AuthUiState(message = "If an account uses that email, a reset link has been sent.")
         }
     }
 
-    fun logout() = runAction { logoutUseCase() }
+    fun logout() = runAction("logout") { logoutUseCase() }
 
     fun clearMessage() {
         _uiState.value = AuthUiState()
     }
 
-    private fun runAction(action: suspend () -> Unit) {
+    private fun runAction(actionName: String, action: suspend () -> Unit) {
         viewModelScope.launch {
             _uiState.value = AuthUiState(isLoading = true)
+            AuthLogger.log("Starting $actionName")
             try {
                 action()
+                AuthLogger.log("Completed $actionName")
                 if (_uiState.value.isLoading) _uiState.value = AuthUiState()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                AuthLogger.logError(actionName, error)
                 _uiState.value = AuthUiState(error = error.toUserMessage())
             }
         }

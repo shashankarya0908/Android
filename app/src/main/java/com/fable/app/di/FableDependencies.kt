@@ -39,10 +39,16 @@ import kotlinx.coroutines.flow.flowOf
 import androidx.room.Room
 
 class FirebaseConfigurationRequiredException :
-    IllegalStateException("Firebase is not configured. Add app/google-services.json and sync the project.")
+    IllegalStateException("Firebase configuration is missing. Add app/google-services.json and rebuild the app.")
 
 class FableDependencies(context: Context) {
-    val firebaseConfigured: Boolean = FirebaseApp.getApps(context.applicationContext).isNotEmpty()
+    val firebaseConfigured: Boolean = runCatching {
+        if (FirebaseApp.getApps(context.applicationContext).isEmpty()) {
+            FirebaseApp.initializeApp(context.applicationContext) != null
+        } else {
+            true
+        }
+    }.getOrDefault(false)
 
     val authenticationRepository: AuthenticationRepository
     val userRepository: UserRepository

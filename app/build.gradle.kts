@@ -7,10 +7,16 @@ plugins {
     alias(libs.plugins.room.ksp)
 }
 
-// Firebase's Google Services plugin generates resources from the real app config.
-// Keep the Phase 1 app buildable until the developer adds their own config file.
-if (file("google-services.json").exists()) {
-    pluginManager.apply("com.google.gms.google-services")
+// Automatically pick up google-services.json if placed in root project directory
+val rootGoogleServices = rootProject.file("google-services.json")
+val appGoogleServices = file("google-services.json")
+if (!appGoogleServices.exists() && rootGoogleServices.exists()) {
+    rootGoogleServices.copyTo(appGoogleServices, overwrite = true)
+}
+
+// Apply Google Services plugin when configuration file is present
+if (appGoogleServices.exists()) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
 }
 
 val googleBooksApiKey = providers.gradleProperty("GOOGLE_BOOKS_API_KEY")
@@ -56,6 +62,10 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 
